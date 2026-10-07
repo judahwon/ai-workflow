@@ -11,6 +11,7 @@ import { appendEvent, runDir } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored, checkEnvIgnored } from './config.mjs';
 import { featureDir, readRequirements, readDesign, hashIfExists } from './documents.mjs';
 import { validateTaskList } from './tasks.mjs';
+import { validateTests, loadChecks } from './testplan.mjs';
 import { describeIgnore } from './init.mjs';
 
 export const PHASES = ['DISCUSS', 'DESIGN', 'DEVELOP', 'REVIEW', 'VERIFY', 'DOCS', 'DONE'];
@@ -25,7 +26,7 @@ export const PHASE_LABELS = {
   DONE: '완료',
 };
 
-const FEATURE_FILES = ['decisions.md', 'requirements.md', 'design.md', 'tasks.json'];
+const FEATURE_FILES = ['decisions.md', 'requirements.md', 'design.md', 'tasks.json', 'tests.json'];
 
 // ---------- 실행 상태 ----------
 
@@ -105,6 +106,7 @@ export function detectApprovalDrift(ctx, run) {
   if (design) {
     if (hashIfExists(ctx, run.featureId, 'design.md') !== design.hash) drift.push({ approval: 'design', reason: 'DESIGN_CHANGED' });
     else if (currentTasksHash(ctx, run) !== design.tasksHash) drift.push({ approval: 'design', reason: 'TASKS_CHANGED' });
+    else if (currentTestsHash(ctx, run) !== design.testsHash) drift.push({ approval: 'design', reason: 'TESTS_CHANGED' });
   }
   return drift;
 }
@@ -113,6 +115,15 @@ function currentTasksHash(ctx, run) {
   try {
     const data = readJson(path.join(featureDir(ctx, run.featureId), 'tasks.json'));
     return Array.isArray(data?.tasks) ? hashJson(data.tasks) : null;
+  } catch {
+    return null;
+  }
+}
+
+function currentTestsHash(ctx, run) {
+  try {
+    const data = readJson(path.join(featureDir(ctx, run.featureId), 'tests.json'));
+    return Array.isArray(data?.tests) ? hashJson(data.tests) : null;
   } catch {
     return null;
   }
@@ -252,6 +263,9 @@ function approveDesign(ctx, run, text) {
   if (design.openQuestions.length) throw blocked('OPEN_QUESTIONS', `설계 미결 질문이 남아 있다: ${design.openQuestions.join(', ')}`);
   const data = readJson(path.join(featureDir(ctx, run.featureId), 'tasks.json'));
   const { tasks, order } = validateTaskList(data, { requirementIds: plan.requirementIds });
+  const testsFile = path.join(featureDir(ctx, run.featureId), 'tests.json');
+  if (!fs.existsSync(testsFile)) throw blocked('TESTS_MISSING', 'tests.json 이 없다. 요구사항마다 확인할 테스트를 정한다.');
+  const { tests, coverage } = validateTests(readJson(testsFile), { requirementIds: plan.requirementIds, origins: loadChecks(ctx).origins });
   run.approvalSeq += 1;
   run.approvals.design = {
     seq: run.approvalSeq,
@@ -260,6 +274,9 @@ function approveDesign(ctx, run, text) {
     hash: design.hash,
     version: design.version,
     tasksHash: hashJson(tasks),
+    testsHash: hashJson(readJson(testsFile).tests),
+    tests,
+    coverage,
     order,
     tasks: Object.fromEntries(tasks.map((t) => [t.id, { hash: hashJson(t), contract: t }])),
   };
@@ -267,7 +284,7 @@ function approveDesign(ctx, run, text) {
   for (const [id, state] of Object.entries(run.tasks)) state.status = order.includes(id) ? 'PENDING' : 'NOT_IN_APPROVAL';
   for (const id of order) run.tasks[id] ??= { status: 'PENDING', attempts: [], reviews: [] };
   run.phase = 'DEVELOP';
-  return `설계 승인 #${run.approvalSeq}: 설계 버전 ${design.version}, 작업 ${tasks.length}개 (순서 ${order.join(' → ')})`;
+  return `설계 승인 #${run.approvalSeq}: 설계 버전 ${design.version}, 작업 ${tasks.length}개 (순서 ${order.join(' → ')}), 테스트 ${tests.length}개`;
 }
 
 export async function cmdApprove(ctx, opts) {
@@ -305,7 +322,18 @@ function describeRun(ctx, run) {
   }
   if (design) {
     for (const id of design.order) lines.push(`  ${id} ${run.tasks[id]?.status ?? 'PENDING'} — ${design.tasks[id].contract.title}`);
+    lines.push(`  테스트: ${(design.tests ?? []).map((t) => `${t.id}(${t.kind})`).join(', ') || '없음'}`);
   }
+  const review = run.reviews?.at(-1);
+  if (review) lines.push(`  검수: R${String(review.seq).padStart(3, '0')} ${review.verdict}, 지적 ${review.findings}건${run.reviewOutcome?.type === 'ACCEPTED' ? ' (사용자 허락으로 넘김)' : ''}`);
+  else if (run.reviewOutcome?.type === 'ACCEPTED') lines.push('  검수: 사용자 허락으로 넘김');
+  const verification = run.verifications?.at(-1);
+  if (verification) {
+    const bad = verification.results.filter((r) => r.required && r.status !== 'PASS').map((r) => `${r.id} ${r.status}`);
+    lines.push(`  검증: V${String(verification.seq).padStart(3, '0')}${verification.partial ? ' (일부)' : ''} ${verification.passed ? '통과' : `미통과 — ${bad.join(', ')}`}`);
+  }
+  if (run.confirmation) lines.push(`  확정: ${run.confirmation.confirmedAt}`);
+  if (run.phase === 'DONE') lines.push(`  보고서: .ai-workflow/features/${run.featureId}/report.md`);
   return lines;
 }
 
@@ -318,6 +346,8 @@ export async function cmdStatus(ctx, opts) {
   for (const e of config.errors) lines.push(`  - ${e.key}: ${e.message}`);
   lines.push(`git 제외: ${describeIgnore(ignore.state)}`);
   lines.push(`Slack 알림: ${config.values.AIWF_SLACK_ENABLED === 'true' ? '사용' : '사용 안 함'}`);
+  const checks = loadChecks(ctx);
+  lines.push(`프로젝트 검사(checks.json): ${!checks.exists ? '없음' : checks.approved ? `승인됨, ${checks.checks.length}개` : `승인 필요${checks.error ? ` — ${checks.error}` : ''}`}`);
   const lock = inspectLock(ctx);
   if (lock) lines.push(`잠금: ${lock.owner?.command ?? '?'} (pid ${lock.owner?.pid ?? '?'}, ${lock.reason})`);
   const runs = opts.run || opts.feature ? [resolveRun(ctx, opts)] : listRuns(ctx).filter((r) => opts.all || r.phase !== 'DONE');
