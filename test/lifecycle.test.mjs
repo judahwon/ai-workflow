@@ -52,17 +52,24 @@ function codexOutput(message) {
   ].join('\n');
 }
 
-// 셸 명령은 실제로 실행하고, codex 호출만 가짜 응답을 준다.
-function fakeCodex(replies) {
+// 셸 명령은 실제로 실행하고, codex 호출만 가짜 응답을 준다. login status 는 기본으로 ChatGPT 로그인이다.
+function fakeCodex(replies, { authOutput = 'Logged in using ChatGPT' } = {}) {
   const calls = [];
   const fn = async (invocation) => {
     if (invocation.shell) return runProcess(invocation);
+    // 이 PC 에 codex.cmd 가 있으면 cmd.exe 로 감싸지므로 명령 문자열로 판단한다.
+    invocation.text = invocation.windowsVerbatimArguments ? invocation.args.at(-1) : invocation.args.join(' ');
+    if (/login status/.test(invocation.text)) {
+      fn.authCalls.push(invocation);
+      return { exitCode: 0, stdout: authOutput, stderr: '', timedOut: false, outputLimitExceeded: false };
+    }
     calls.push(invocation);
     const reply = replies.shift();
     if (typeof reply === 'function') return reply(invocation);
     return { exitCode: 0, stdout: codexOutput(reply), stderr: '', timedOut: false, outputLimitExceeded: false };
   };
   fn.calls = calls;
+  fn.authCalls = [];
   return fn;
 }
 
@@ -210,7 +217,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   assert.equal(r.code, 3);
   assert.match(r.out, /CHANGES_REQUESTED[\s\S]*\[high\] src\/pages\/orders\/List\.tsx:3 빈 결과 처리 없음/);
   const call = extra.runProcess.calls[0];
-  assert.ok(call.args.includes('read-only') && call.args.includes('gpt-6.1-sol'), call.args.join(' '));
+  assert.match(call.text, /exec --sandbox read-only .*--model gpt-6\.1-sol/);
   const prompt = fs.readFileSync(path.join(p.workflowRoot, 'runs', loadRun(p).runId, 'reviews', 'R001-prompt.md'), 'utf8');
   assert.match(prompt, /List\.tsx \(새 파일\)\r?\nv1/, '프롬프트에 바뀐 내용이 들어간다');
   assert.match(prompt, /REQ-002/);
@@ -436,4 +443,47 @@ test('browser 실행기: 선언형 단계 통과·실패와 정리', async () =>
   assert.equal(r.code, 'ENV_MISSING');
   r = await runBrowser({ origin: 'app', steps }, { ...io, playwright: { error: 'Playwright 없음' } });
   assert.equal(r.code, 'PLAYWRIGHT_MISSING');
+});
+
+test('review: ChatGPT 로그인이 아니면 막고, API 키 환경변수를 검수자에게 넘기지 않는다', async (t) => {
+  const p = await project();
+  t.after(p.cleanup);
+  await finishTask(p);
+  p.extra.env = { ...process.env, OPENAI_API_KEY: 'sk-test-should-not-pass-1234567890', CODEX_API_KEY: 'x' };
+
+  p.extra.runProcess = fakeCodex([reviewJson('APPROVED')], { authOutput: 'Logged in using an API key - sk-proj-***' });
+  let r = await p.run('review', ...F);
+  assert.equal(r.code, 3);
+  assert.match(r.out, /AUTH_NOT_CHATGPT[\s\S]*API 키로 로그인/);
+  assert.doesNotMatch(r.out, /sk-proj/, 'login status 출력은 남기지 않는다');
+  assert.equal(p.extra.runProcess.calls.length, 0, '검수자를 실행하지 않는다');
+
+  p.extra.runProcess = fakeCodex([reviewJson('APPROVED')], { authOutput: 'Not logged in' });
+  r = await p.run('review', ...F);
+  assert.match(r.out, /AUTH_NOT_CHATGPT[\s\S]*확인하지 못했다/);
+
+  p.extra.runProcess = fakeCodex([reviewJson('APPROVED')]);
+  r = await p.run('review', ...F);
+  assert.equal(r.code, 0, r.out);
+  const exec = p.extra.runProcess.calls[0];
+  assert.equal(exec.env.OPENAI_API_KEY, undefined);
+  assert.equal(exec.env.CODEX_API_KEY, undefined);
+  assert.equal(p.extra.runProcess.authCalls[0].env.OPENAI_API_KEY, undefined);
+  assert.ok(exec.env.PATH ?? exec.env.Path, '다른 환경변수는 유지한다');
+});
+
+test('review: AIWF_REVIEW_AUTH=any 면 로그인 확인 없이 환경을 그대로 넘긴다', async (t) => {
+  const p = await project();
+  t.after(p.cleanup);
+  await finishTask(p);
+  let r = await p.run('init', '--set', 'AIWF_REVIEW_AUTH=any');
+  assert.equal(r.code, 0, r.out);
+  p.extra.env = { ...process.env, OPENAI_API_KEY: 'sk-test-allowed-1234567890' };
+  p.extra.runProcess = fakeCodex([reviewJson('APPROVED')], { authOutput: 'Logged in using an API key' });
+  r = await p.run('review', ...F);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(p.extra.runProcess.authCalls.length, 0);
+  assert.equal(p.extra.runProcess.calls[0].env.OPENAI_API_KEY, 'sk-test-allowed-1234567890');
+  r = await p.run('init', '--set', 'AIWF_REVIEW_AUTH=apikey');
+  assert.match(r.out, /chatgpt 또는 any/);
 });
