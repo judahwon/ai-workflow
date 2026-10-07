@@ -18,6 +18,12 @@ export function notificationsEnabled(ctx) {
   return ctx.config?.values?.AIWF_SLACK_ENABLED === 'true';
 }
 
+// Slack 으로 보내는 이벤트 (단계 전환·사용자 확인이 필요한 것). 나머지는 기록만 한다.
+export const NOTIFY_TYPES = new Set([
+  'RUN_CREATED', 'REQUIREMENTS_CONFIRMED', 'DESIGN_CONFIRMED', 'REQUIREMENTS_UPDATED', 'DESIGN_UPDATED',
+  'TASK_DONE', 'TASK_REOPENED', 'REVIEW_DONE', 'REVIEW_FAILED', 'REVIEW_ACCEPTED', 'VERIFY_DONE', 'CONFIRMED', 'RUN_DONE',
+]);
+
 export function appendEvent(ctx, run, fields) {
   const file = eventsFile(ctx, run.runId);
   const { records } = readJsonl(file);
@@ -43,7 +49,7 @@ export function appendEvent(ctx, run, fields) {
     nextAction: fields.nextAction ? redact(fields.nextAction).slice(0, 500) : null,
   };
   appendJsonl(file, event);
-  if (notificationsEnabled(ctx)) {
+  if (notificationsEnabled(ctx) && NOTIFY_TYPES.has(event.type)) {
     appendJsonl(notificationsFile(ctx, run.runId), { eventId: event.eventId, status: 'PENDING', at: ctx.now(), attempts: 0 });
   }
   return event;
