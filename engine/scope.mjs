@@ -48,6 +48,7 @@ export function protectedReason(relPath, { ignoreCase = false } = {}) {
   if (p.startsWith('.ai-workflow/engine/')) return '워크플로 엔진 (설치·업그레이드로만 바뀐다)';
   if (p.startsWith('.ai-workflow/runs/') || p.startsWith('.ai-workflow/state/')) return '워크플로 실행 상태 (엔진 명령으로만 바뀐다)';
   if (p === '.ai-workflow/.env') return '워크플로 설정 (init 으로만 바꾼다)';
+  if (p === '.ai-workflow/checks.json') return '프로젝트 검사 설정 (사용자 승인과 함께 checks-set 으로만 바꾼다)';
   return null;
 }
 
@@ -119,4 +120,33 @@ export function classifyChanges(files, { allowedFiles, featureId, ignoreCase }) 
     else outOfScope.push(rel);
   }
   return { inScope, outOfScope, docs };
+}
+
+// 작업 트리 상태의 지문. 검수·검증 결과가 지금 코드에 대한 것인지 확인하는 데 쓴다.
+// 세션 설정(.claude/)과 기능 문서(승인 무효화로 따로 관리)는 뺀다. git 저장소가 아니면 null.
+const FINGERPRINT_EXCLUDED = ['.claude/', '.ai-workflow/features/'];
+
+export function workspaceFingerprint(ctx) {
+  if (!gitAvailable(ctx)) return null;
+  const head = ctx.git(ctx.projectRoot, ['rev-parse', '--verify', '-q', 'HEAD']);
+  const base = head.status === 0 ? head.stdout.trim() : EMPTY_TREE;
+  const files = changedSince(ctx, base)
+    .filter((rel) => !FINGERPRINT_EXCLUDED.some((prefix) => rel.startsWith(prefix)))
+    .map((rel) => [rel, fileHash(ctx.projectRoot, rel)]);
+  return sha256(JSON.stringify({ base, files }));
+}
+
+// 기준 커밋 대비 diff 텍스트 (검수 요청용). 추적되지 않은 파일은 내용 그대로 붙인다.
+export function diffSince(ctx, base, files, { maxBytes = 200 * 1024 } = {}) {
+  const parts = [];
+  const tracked = ctx.git(ctx.projectRoot, ['diff', '--no-color', '--relative', base, '--', ...files]);
+  if (tracked.status === 0 && tracked.stdout) parts.push(tracked.stdout);
+  const untracked = ctx.git(ctx.projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', ...files]);
+  for (const rel of untracked.status === 0 ? splitZ(untracked.stdout) : []) {
+    try {
+      parts.push(`--- /dev/null\n+++ b/${rel} (새 파일)\n${fs.readFileSync(path.join(ctx.projectRoot, rel), 'utf8')}`);
+    } catch { /* 읽을 수 없는 파일은 건너뛴다 */ }
+  }
+  const text = parts.join('\n');
+  return Buffer.byteLength(text) > maxBytes ? `${text.slice(0, maxBytes)}\n…[diff 가 상한(${maxBytes} bytes)을 넘어 잘림. 나머지는 파일을 직접 읽는다]` : text;
 }
