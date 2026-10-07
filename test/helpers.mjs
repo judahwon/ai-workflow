@@ -77,3 +77,16 @@ export const TASK = {
 };
 
 export const APPROVE = ['--approval-text', '진행해', '--user-confirmed'];
+
+// 모든 REQ 를 덮는 기본 기능 테스트 (설계 승인에 tests.json 이 필요하다).
+export const TEST = {
+  id: 'TEST-001',
+  title: '단위 테스트',
+  kind: 'command',
+  requirementIds: ['REQ-001', 'REQ-002'],
+  command: 'node -e "process.exit(0)"',
+};
+
+export function testsJson(tests = [TEST]) {
+  return JSON.stringify({ tests }, null, 2);
+}

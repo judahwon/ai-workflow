@@ -86,7 +86,7 @@ test('install: 스킬을 .claude/skills 에 두고 훅은 기존 설정을 지�
   const p = setupProject();
   t.after(p.cleanup);
   const claudeDir = path.join(p.projectRoot, '.claude');
-  for (const name of ['aiwf', 'aiwf-setup', 'aiwf-discuss', 'aiwf-design', 'aiwf-develop']) {
+  for (const name of ['aiwf', 'aiwf-setup', 'aiwf-discuss', 'aiwf-design', 'aiwf-develop', 'aiwf-review', 'aiwf-verify', 'aiwf-docs']) {
     const text = fs.readFileSync(path.join(claudeDir, 'skills', name, 'SKILL.md'), 'utf8');
     assert.match(text, new RegExp(`^---\r?\nname: ${name}\r?\n`), name);
   }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { configuredProject, git, REQUIREMENTS, DESIGN, TASK, APPROVE, tasksJson } from './helpers.mjs';
+import { configuredProject, git, REQUIREMENTS, DESIGN, TASK, APPROVE, tasksJson, testsJson } from './helpers.mjs';
 import { readJsonl } from '../engine/util.mjs';
 import { patternToRegExp, matchesAllowed } from '../engine/scope.mjs';
 import { runHook } from '../engine/hook.mjs';
@@ -36,6 +36,7 @@ async function developProject(tasks = TASKS) {
   let r = await p.run('approve', '--feature', 'FEAT-001', '--phase', 'plan', ...APPROVE);
   assert.equal(r.code, 0, r.out);
   p.write('features/FEAT-001/design.md', DESIGN);
+  p.write('features/FEAT-001/tests.json', testsJson());
   p.write('features/FEAT-001/tasks.json', tasksJson(tasks));
   r = await p.run('approve', '--feature', 'FEAT-001', '--phase', 'design', ...APPROVE);
   assert.equal(r.code, 0, r.out);
