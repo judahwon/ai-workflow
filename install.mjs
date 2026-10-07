@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // 프로젝트에 ai-workflow 를 설치한다: <프로젝트>/.ai-workflow/{engine,templates} 복사, .gitignore·.env.example 생성.
-// 사용: node install.mjs <프로젝트 루트> [--upgrade]
-//   --upgrade : 이미 설치된 프로젝트의 엔진만 교체한다. features/·runs/·.env·직접 고친 템플릿은 건드리지 않는다.
+// Claude Code 단계별 스킬(.claude/skills/aiwf*)과 파일 수정 범위 훅(.claude/settings.json)도 등록한다.
+// 사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude]
+//   --upgrade   : 이미 설치된 프로젝트의 엔진·스킬만 교체한다. features/·runs/·.env·직접 고친 템플릿은 건드리지 않는다.
+//   --no-claude : .claude/ 아래(스킬·훅)는 건드리지 않는다.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -9,6 +11,12 @@ import { ensureGitignore, writeEnvExample } from './engine/init.mjs';
 
 const FRAMEWORK_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = '.ai-workflow';
+const SKILL_PREFIX = 'aiwf';
+export const HOOK_MARKER = '.ai-workflow/engine/hook.mjs';
+export const HOOK_ENTRY = {
+  matcher: 'Edit|Write|MultiEdit|NotebookEdit',
+  hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.ai-workflow/engine/hook.mjs"' }],
+};
 
 function copyDir(from, to, { overwrite }) {
   const copied = [];
@@ -27,7 +35,52 @@ function copyDir(from, to, { overwrite }) {
   return copied;
 }
 
-export function install(projectRoot, { upgrade = false } = {}) {
+// 프레임워크의 스킬을 .claude/skills/ 에 덮어쓴다. 프레임워크에서 사라진 aiwf* 스킬은 지운다.
+function installSkills(root) {
+  const source = path.join(FRAMEWORK_ROOT, 'skills');
+  const target = path.join(root, '.claude', 'skills');
+  const names = fs.readdirSync(source, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  if (fs.existsSync(target)) {
+    for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith(SKILL_PREFIX) && !names.includes(entry.name)) {
+        fs.rmSync(path.join(target, entry.name), { recursive: true });
+      }
+    }
+  }
+  for (const name of names) {
+    fs.rmSync(path.join(target, name), { recursive: true, force: true });
+    copyDir(path.join(source, name), path.join(target, name), { overwrite: true });
+  }
+  return names;
+}
+
+// .claude/settings.json 의 PreToolUse 에 범위 훅을 한 번만 추가한다. 다른 설정은 그대로 둔다.
+// 반환: 'added' | 'present' | 'invalid'
+export function registerHook(root) {
+  const file = path.join(root, '.claude', 'settings.json');
+  let settings = {};
+  if (fs.existsSync(file)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return 'invalid';
+    }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return 'invalid';
+  }
+  settings.hooks ??= {};
+  if (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) return 'invalid';
+  settings.hooks.PreToolUse ??= [];
+  if (!Array.isArray(settings.hooks.PreToolUse)) return 'invalid';
+  const present = settings.hooks.PreToolUse.some((entry) => (entry?.hooks ?? [])
+    .some((hook) => typeof hook?.command === 'string' && hook.command.includes(HOOK_MARKER)));
+  if (present) return 'present';
+  settings.hooks.PreToolUse.push(HOOK_ENTRY);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
+  return 'added';
+}
+
+export function install(projectRoot, { upgrade = false, claude = true } = {}) {
   const root = path.resolve(projectRoot);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`프로젝트 폴더가 없다: ${root}`);
   if (path.resolve(root) === FRAMEWORK_ROOT) throw new Error('프레임워크 저장소 자신에는 설치하지 않는다.');
@@ -46,24 +99,37 @@ export function install(projectRoot, { upgrade = false } = {}) {
   fs.writeFileSync(path.join(workflowRoot, 'VERSION'), `${pkg.version}\n`);
   const ignoreAdded = ensureGitignore(workflowRoot);
   writeEnvExample(workflowRoot);
-  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version };
+  const skills = claude ? installSkills(root) : [];
+  const hook = claude ? registerHook(root) : 'disabled';
+  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook };
 }
 
+const HOOK_MESSAGES = {
+  added: '.claude/settings.json 에 파일 수정 범위 훅을 추가했다',
+  present: '파일 수정 범위 훅은 이미 등록돼 있다',
+  invalid: '[주의] .claude/settings.json 을 해석할 수 없어 훅을 등록하지 못했다. README 의 훅 설정을 직접 넣는다',
+  disabled: '.claude/ 는 건드리지 않았다 (--no-claude)',
+};
+
 function main(argv) {
-  const args = argv.filter((a) => a !== '--upgrade');
+  const flags = ['--upgrade', '--no-claude'];
+  const args = argv.filter((a) => !flags.includes(a));
   if (args.length !== 1 || args[0].startsWith('--')) {
-    process.stderr.write('사용: node install.mjs <프로젝트 루트> [--upgrade]\n');
+    process.stderr.write('사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude]\n');
     return 2;
   }
   try {
-    const r = install(args[0], { upgrade: argv.includes('--upgrade') });
+    const r = install(args[0], { upgrade: argv.includes('--upgrade'), claude: !argv.includes('--no-claude') });
     process.stdout.write([
       `${r.upgraded ? '엔진 교체' : '설치'} 완료 (v${r.version}): ${r.workflowRoot}`,
       `  엔진 파일 ${r.engineFiles}개, 새 템플릿 ${r.templateFiles}개${r.ignoreAdded.length ? `, .gitignore 추가: ${r.ignoreAdded.join(' ')}` : ''}`,
+      ...(r.skills.length ? [`  스킬: ${r.skills.map((n) => `.claude/skills/${n}`).join(', ')}`] : []),
+      `  ${HOOK_MESSAGES[r.hook]}`,
       '',
       '다음 단계 (프로젝트 루트에서):',
       '  node .ai-workflow/engine/cli.mjs init      # 프로젝트·개인 설정 질의 → .ai-workflow/.env',
       '  node .ai-workflow/engine/cli.mjs status',
+      '  또는 프로젝트 루트에서 Claude Code 를 열고 /aiwf 로 시작한다',
       '',
     ].join('\n'));
     return 0;
