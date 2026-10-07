@@ -92,6 +92,28 @@ export const CONFIG_SECTIONS = [
     ],
   },
   {
+    title: '자율 진행',
+    scope: 'project',
+    keys: [
+      {
+        name: 'AIWF_AUTO_MAX_REVIEW_ROUNDS',
+        question: '자율 진행 중 Codex 검수 지적을 몇 번까지 master 가 고치게 할까요? (넘으면 사용자를 부름)',
+        description: '자율 진행: 검수 지적 반복 상한. 넘으면 사용자를 부른다.',
+        default: '3',
+        required: true,
+        validate: (v) => (/^(10|[1-9])$/.test(v) ? null : '1~10'),
+      },
+      {
+        name: 'AIWF_AUTO_MAX_VERIFY_FAILURES',
+        question: '자율 진행 중 검증 실패를 몇 번까지 master 가 고치게 할까요? (넘으면 사용자를 부름)',
+        description: '자율 진행: 연속 검증 실패 상한. 넘으면 사용자를 부른다.',
+        default: '3',
+        required: true,
+        validate: (v) => (/^(10|[1-9])$/.test(v) ? null : '1~10'),
+      },
+    ],
+  },
+  {
     title: '이 PC',
     scope: 'user',
     keys: [

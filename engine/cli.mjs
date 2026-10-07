@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { WorkflowError, usageError } from './util.mjs';
 import { createContext } from './context.mjs';
 import { cmdInit, cmdQuestions } from './init.mjs';
-import { cmdNew, cmdApprove, cmdStatus, cmdUnlock } from './runs.mjs';
+import { cmdNew, cmdApprove, cmdStatus, cmdUnlock, cmdDesignCheck } from './runs.mjs';
 import { cmdTaskStart, cmdTaskDone, cmdTaskPause, cmdTaskReopen, cmdCheckScope } from './develop.mjs';
 import { cmdChecksSet, cmdVerify, cmdTestConfirm, cmdConfirm } from './verify.mjs';
 import { cmdReview, cmdReviewAccept } from './review.mjs';
@@ -14,6 +14,7 @@ import { cmdDocsDone } from './docs.mjs';
 import { cmdNotify, flushNotifications, describeFlush } from './notify.mjs';
 import { notificationsEnabled } from './events.mjs';
 import { renderDecision } from './decisions.mjs';
+import { cmdAutonomySet, cmdAutonomySuggest, cmdEscalate, cmdResume } from './autonomy.mjs';
 
 const S = 'string';
 const B = 'boolean';
@@ -25,7 +26,8 @@ export const COMMANDS = {
   questions: { options: {}, run: cmdQuestions },
   status: { options: { run: S, feature: S, all: B, json: B }, run: cmdStatus },
   new: { options: { title: S, feature: S }, run: cmdNew },
-  approve: { options: { run: S, feature: S, phase: S, 'approval-text': S, 'user-confirmed': B }, run: cmdApprove },
+  approve: { options: { run: S, feature: S, phase: S, 'approval-text': S, 'user-confirmed': B, autonomous: B, 'by-master': B, reason: S }, run: cmdApprove },
+  'design-check': { options: { run: S, feature: S }, run: cmdDesignCheck },
   'task-start': { options: { run: S, feature: S, task: S }, run: cmdTaskStart },
   'task-done': { options: { run: S, feature: S, task: S, summary: S, 'extra-approved': S, 'user-confirmed': B }, run: cmdTaskDone },
   'task-pause': { options: {}, run: cmdTaskPause },
@@ -38,6 +40,10 @@ export const COMMANDS = {
   'test-confirm': { options: { run: S, feature: S, test: S, 'approval-text': S, 'user-confirmed': B }, run: cmdTestConfirm },
   confirm: { options: { run: S, feature: S, 'approval-text': S, 'user-confirmed': B }, run: cmdConfirm },
   'docs-done': { options: { run: S, feature: S, summary: S, 'extra-approved': S, 'no-docs-approved': S, 'user-confirmed': B }, run: cmdDocsDone },
+  'autonomy-suggest': { options: {}, run: cmdAutonomySuggest },
+  'autonomy-set': { options: { from: S, 'approval-text': S, 'user-confirmed': B }, run: cmdAutonomySet },
+  escalate: { options: { run: S, feature: S, kind: S, summary: S, option: LIST }, run: cmdEscalate },
+  resume: { options: { run: S, feature: S, 'approval-text': S, 'user-confirmed': B }, run: cmdResume },
   notify: { options: { test: B, 'retry-uncertain': B, 'retry-failed': B }, run: cmdNotify },
   unlock: { options: { stale: B, reason: S, 'force-unverified': B }, run: cmdUnlock },
 };
@@ -62,7 +68,12 @@ export const HELP = `사용: node <엔진 폴더>/cli.mjs <command> [options]   
       plan  : requirements.md 승인 (명세 버전·REQ 필요, 미결 질문 없어야 함) → 설계 단계
       design: design.md + tasks.json 승인 (모든 REQ 가 작업에 연결돼야 함) → 개발 단계
       사용자가 대화에서 실제로 진행을 확인한 뒤에만 실행한다.
+      --autonomous (plan): 자율 진행으로 맡긴다. master 가 설계·개발·검수·검증을 진행하고 필요할 때만 사용자를 부른다.
+  approve (--run|--feature) --phase design --by-master --reason "<근거>"
+      자율 진행 중 master 가 설계를 승인한다 (사용자 답변 대신 근거를 남긴다).
   status [--run RUN | --feature FEAT] [--all] [--json]
+  design-check (--run RUN | --feature FEAT)
+      design.md·tasks.json·tests.json 이 설계 승인 조건을 갖췄는지 승인 없이 확인한다.
 
 개발
   task-start (--run RUN | --feature FEAT) --task TASK-###
@@ -94,6 +105,15 @@ export const HELP = `사용: node <엔진 폴더>/cli.mjs <command> [options]   
 문서
   docs-done (--run|--feature) --summary "<쓴 문서>" [--extra-approved "..." | --no-docs-approved "..."] [--user-confirmed]
       확정 이후 문서 폴더(AIWF_DOCS_DIR)만 바뀌었는지 확인하고 report.md 를 남긴 뒤 완료한다.
+
+자율 진행
+  autonomy-suggest          허용 명령 후보 (checks.json·package.json 스크립트·git 읽기)
+  autonomy-set --from <JSON> --approval-text "<사용자 답변 원문>" --user-confirmed
+      자율 진행 중 권한 확인 없이 실행할 명령 접두사(.ai-workflow/autonomy.json)를 승인과 함께 저장한다.
+  escalate (--run|--feature) --kind permission|blocked|plan|limit|stalled|confirm|other --summary "<이유>" [--option "이름::설명" ...]
+      사용자를 부른다 (Slack 멘션). 사용자가 돌아올 때까지 그 기능은 사용자 대기 상태다.
+  resume (--run|--feature) --approval-text "<사용자 답변 원문>" --user-confirmed
+      사용자 답을 기록하고 자율 진행을 이어간다.
 
 알림
   notify [--test] [--retry-uncertain] [--retry-failed]

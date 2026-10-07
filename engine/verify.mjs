@@ -11,6 +11,7 @@ import { appendEvent, runDir } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
 import { resolveRun, saveRun, syncApprovals, driftBlocked, PHASE_LABELS } from './runs.mjs';
 import { verifyFailedDecision, confirmReadyDecision } from './decisions.mjs';
+import { escalate, isAutonomous, autonomyLimits } from './autonomy.mjs';
 import { CHECKS_FILE, checksPath, checksContentHash, validateChecks, loadChecks } from './testplan.mjs';
 import { runCommand, runHttp, runBrowser } from './runners.mjs';
 import { workspaceFingerprint, captureBaseline } from './scope.mjs';
@@ -150,6 +151,33 @@ export async function cmdVerify(ctx, opts) {
     let decision = null;
     if (!verification.passed) decision = verifyFailedDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, failed: failedIds, manual: manualIds });
     else if (run.phase === 'VERIFY' && !verification.partial && confirmationProblems(ctx, run).problems.length === 0) decision = confirmReadyDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId });
+    const eventFields = {
+      data: { passed: count('PASS'), bad: requiredBad.length, badIds: requiredBad.map((r) => r.id), partial: verification.partial },
+      status: verification.passed ? 'PASS' : 'FAIL',
+      reason: requiredBad.length ? requiredBad.map((r) => `${r.id} ${r.status} ${r.code}`).join(', ').slice(0, 900) : null,
+      evidencePaths: results.map((r) => r.logPath).filter(Boolean),
+    };
+    if (isAutonomous(run) && run.phase === 'VERIFY' && !verification.partial) {
+      const full = run.verifications.filter((v) => !v.partial);
+      let streak = 0;
+      for (let i = full.length - 1; i >= 0 && !full[i].passed; i--) streak++;
+      const max = autonomyLimits(ctx).maxVerifyFailures;
+      const onlyManual = !verification.passed && failedIds.length === 0 && manualIds.length > 0;
+      const ready = verification.passed && decision;
+      if (ready || onlyManual) {
+        // 끝났다: 보고하고 사용자 확정(과 사람이 볼 테스트)을 요청한다.
+        const tasks = run.approvals.design?.order.length ?? 0;
+        const review = run.reviews?.at(-1);
+        const reportLine = `설계·개발·검수·검증 완료 — 작업 ${tasks}개, 검수 ${review ? `R${String(review.seq).padStart(3, '0')} ${review.verdict}` : '사용자 허락'}, 자동 검증 통과 ${count('PASS')}건${manualIds.length ? `, 사람 확인 필요 ${manualIds.length}건 (${manualIds.join(', ')})` : ''}.`;
+        escalate(ctx, run, { kind: 'confirm', type: 'VERIFY_DONE', summary: reportLine, decision, fields: eventFields });
+        return { ok: verification.passed, message: [summary, ...resultLines(results), reportLine, '자율 진행: 사용자를 불렀다 (확정 요청).'].join('\n'), decision };
+      }
+      if (!verification.passed && streak >= max) {
+        escalate(ctx, run, { kind: 'limit', type: 'VERIFY_DONE', summary: `검증이 연속 ${streak}번 실패했다 (상한 ${max}): ${failedIds.join(', ')}`, decision, fields: eventFields });
+        return { ok: false, message: [summary, ...resultLines(results), `자율 진행: 연속 실패 상한(${max})을 넘어 사용자를 불렀다.`].join('\n'), decision };
+      }
+      if (!verification.passed) decision = null;
+    }
     appendEvent(ctx, run, {
       type: 'VERIFY_DONE',
       data: { passed: count('PASS'), bad: requiredBad.length, badIds: requiredBad.map((r) => r.id), partial: verification.partial },
@@ -160,13 +188,14 @@ export async function cmdVerify(ctx, opts) {
       evidencePaths: results.map((r) => r.logPath).filter(Boolean),
       nextAction: verification.passed ? (run.phase === 'VERIFY' ? '사용자에게 결과를 보여주고 confirm 으로 확정받는다.' : '검수 단계로 진행한다.') : '실패 원인을 고치거나 사용자와 상의한다.',
     });
-    const lines = [summary];
-    for (const r of results) {
-      lines.push(`  ${r.status.padEnd(7)} ${r.id} ${r.title}${r.required ? '' : ' [선택]'} — ${r.message}${r.logPath ? `  (로그 .ai-workflow/${r.logPath})` : ''}`);
-    }
+    const lines = [summary, ...resultLines(results)];
     if (!fingerprint) lines.push('[주의] git 저장소가 아니라 결과가 지금 코드에 대한 것인지 확인하지 못한다.');
     return { ok: verification.passed, message: lines.join('\n'), decision };
   });
+}
+
+function resultLines(results) {
+  return results.map((r) => `  ${r.status.padEnd(7)} ${r.id} ${r.title}${r.required ? '' : ' [선택]'} — ${r.message}${r.logPath ? `  (로그 .ai-workflow/${r.logPath})` : ''}`);
 }
 
 // ---------- test-confirm ----------
@@ -181,6 +210,7 @@ export async function cmdTestConfirm(ctx, opts) {
     if (test.kind !== 'manual') throw blocked('NOT_MANUAL', `${testId} 는 ${test.kind} 테스트다. verify 로 실행한다.`);
     run.manualConfirmations ??= {};
     run.manualConfirmations[testId] = { approvalText: text, confirmedAt: ctx.now(), fingerprint: workspaceFingerprint(ctx) };
+    run.waiting = null; // 사용자가 돌아와 답했다 (자율 진행 대기 해제)
     saveRun(ctx, run);
     appendEvent(ctx, run, { type: 'MANUAL_TEST_CONFIRMED', testId, status: 'PASS', actor: 'master', summary: `${testId} ${test.title} 사용자 확인`, reason: `사용자 답변: ${text.slice(0, 300)}` });
     return { ok: true, message: `${testId} 사용자 확인 기록. verify 를 다시 실행하면 통과로 반영된다.` };
@@ -223,6 +253,7 @@ export async function cmdConfirm(ctx, opts) {
     if (problems.length) throw blocked('NOT_READY', ['확정할 수 없다:', ...problems.map((p) => `  - ${p}`)].join('\n'));
     const latest = run.verifications.filter((v) => !v.partial).at(-1);
     run.confirmation = { approvalText: text, confirmedAt: ctx.now(), fingerprint, verificationSeq: latest.seq };
+    run.waiting = null;
     run.docs = { startedAt: ctx.now(), baseline: captureBaseline(ctx) };
     run.phase = 'DOCS';
     saveRun(ctx, run);

@@ -23,6 +23,7 @@ export function notificationsEnabled(ctx) {
 export const NOTIFY_TYPES = new Set([
   'RUN_CREATED', 'REQUIREMENTS_CONFIRMED', 'DESIGN_CONFIRMED', 'REQUIREMENTS_UPDATED', 'DESIGN_UPDATED',
   'TASK_DONE', 'TASK_REOPENED', 'REVIEW_DONE', 'REVIEW_FAILED', 'REVIEW_ACCEPTED', 'VERIFY_DONE', 'CONFIRMED', 'RUN_DONE',
+  'ESCALATED', 'RESUMED',
 ]);
 
 export function appendEvent(ctx, run, fields) {
@@ -52,6 +53,9 @@ export function appendEvent(ctx, run, fields) {
     // 알림 문구용 숫자·이름 (작업 n/m, 지적 건수 등)과 사용자가 고를 선택지.
     data: fields.data ?? null,
     decision: fields.decision ?? null,
+    // 자율 진행 중인 실행이면 멘션은 사용자를 부를 때(escalation)만 한다.
+    autonomous: run.autonomy?.enabled === true,
+    escalation: fields.escalation ?? null,
   };
   appendJsonl(file, event);
   if (notificationsEnabled(ctx) && NOTIFY_TYPES.has(event.type) && wanted(ctx, event)) {

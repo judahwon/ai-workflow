@@ -48,7 +48,8 @@ export function toProjectSkill(text) {
 function installSkills(root) {
   const source = path.join(FRAMEWORK_ROOT, 'skills');
   const target = path.join(root, '.claude', 'skills');
-  const names = fs.readdirSync(source, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  // 자율 진행(aiwf-autopilot)은 플러그인의 에이전트·세션 훅이 있어야 해서 플러그인으로만 쓴다.
+  const names = fs.readdirSync(source, { withFileTypes: true }).filter((e) => e.isDirectory() && !PLUGIN_ONLY_SKILLS.includes(e.name)).map((e) => e.name);
   if (fs.existsSync(target)) {
     for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
       if (entry.isDirectory() && entry.name.startsWith(SKILL_PREFIX) && !names.includes(entry.name)) {
@@ -105,6 +106,7 @@ export function lintersNeedingIgnore(root) {
     .map(([tool]) => tool);
 }
 
+const PLUGIN_ONLY_SKILLS = ['aiwf-autopilot'];
 const LOCAL_EXCLUDES = ['/.ai-workflow/', '/.claude/settings.json', '/.claude/skills/aiwf*/'];
 
 export function install(projectRoot, { upgrade = false, claude = true, local = false } = {}) {

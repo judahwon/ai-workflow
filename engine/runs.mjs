@@ -16,6 +16,7 @@ import { describeIgnore } from './init.mjs';
 import { templateDir } from './context.mjs';
 import { ENGINE_VERSION, stampProjectVersion } from './version.mjs';
 import { approvalDriftDecision } from './decisions.mjs';
+import { escalate, isAutonomous, loadAutonomy } from './autonomy.mjs';
 
 export const PHASES = ['DISCUSS', 'DESIGN', 'DEVELOP', 'REVIEW', 'VERIFY', 'DOCS', 'DONE'];
 
@@ -153,6 +154,17 @@ export function syncApprovals(ctx, run) {
     invalidate(ctx, run, 'design', reasons);
     run.phase = 'DESIGN';
   }
+  // 자율 진행: 요구사항이 바뀌면 기획(사용자 몫)이 흔들린 것이라 사용자를 부른다. 설계만 바뀌면 master 가 다시 승인한다.
+  if (isAutonomous(run) && planChanged) {
+    escalate(ctx, run, {
+      kind: 'plan',
+      type: 'REQUIREMENTS_UPDATED',
+      summary: `승인 이후 요구사항이 바뀌어 기획·설계 승인이 풀렸다 (${reasons}).`,
+      decision: approvalDriftDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, plan: true, reason: reasons }),
+      fields: { reason: reasons },
+    });
+    return drift;
+  }
   saveRun(ctx, run);
   appendEvent(ctx, run, {
     type: planChanged ? 'REQUIREMENTS_UPDATED' : 'DESIGN_UPDATED',
@@ -162,7 +174,7 @@ export function syncApprovals(ctx, run) {
       : '승인 이후 설계 또는 작업 목록이 바뀌어 설계 승인을 무효화했다.',
     reason: reasons,
     nextAction: '바뀐 내용을 사용자와 확인한 뒤 다시 승인받는다.',
-    decision: approvalDriftDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, plan: planChanged, reason: reasons }),
+    decision: isAutonomous(run) ? null : approvalDriftDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, plan: planChanged, reason: reasons }),
   });
   return drift;
 }
@@ -241,6 +253,14 @@ export async function cmdNew(ctx, opts) {
 // ---------- 명령: approve ----------
 
 function approvalText(opts) {
+  // 자율 진행 중 설계는 master 가 근거를 남기고 승인한다 (사용자 답변 대신).
+  if (opts['by-master']) {
+    const reason = typeof opts.reason === 'string' ? opts.reason.trim() : '';
+    if (opts.phase !== 'design') throw usageError('--by-master 는 설계 승인(--phase design)에만 쓴다. 기획 승인은 사용자만 한다.');
+    if (opts['user-confirmed'] || opts['approval-text']) throw usageError('--by-master 에는 --approval-text·--user-confirmed 를 함께 쓰지 않는다.');
+    if (reason.length < 10) throw usageError('--by-master 에는 --reason "<설계가 기획을 충족한다고 본 근거>" (10자 이상)이 필요하다.');
+    return `[master 판단] ${reason}`;
+  }
   const text = typeof opts['approval-text'] === 'string' ? opts['approval-text'].trim() : '';
   if (opts['user-confirmed'] !== true || text.length < 2) {
     throw usageError('approve 는 사용자가 대화에서 진행을 확인한 뒤에만 실행한다. --user-confirmed 와 --approval-text "<사용자 답변 원문>" 이 필요하다.');
@@ -309,19 +329,40 @@ export async function cmdApprove(ctx, opts) {
     const run = resolveRun(ctx, opts);
     const drift = syncApprovals(ctx, run);
     if (drift.length) ctx.out(`[알림] 승인 이후 문서 변경 감지 — 승인을 되돌렸다: ${drift.map((d) => d.reason).join(', ')}`);
+    if (opts['by-master'] && !isAutonomous(run)) throw blocked('NOT_AUTONOMOUS', '자율 진행으로 맡긴 기능이 아니다. 설계 승인은 사용자에게 받는다.');
+    if (opts['by-master'] && run.waiting) throw blocked('WAITING_USER', `사용자를 기다리는 중이다 (${run.waiting.kind}: ${run.waiting.summary}). 사용자 답을 받아 resume 한 뒤 진행한다.`);
+    if (opts.autonomous && opts.phase !== 'plan') throw usageError('--autonomous 는 기획 승인(--phase plan)에서만 쓴다.');
     const summary = opts.phase === 'plan' ? approvePlan(ctx, run, text) : approveDesign(ctx, run, text);
+    if (opts['by-master']) run.approvals.design.by = 'master';
+    if (!opts['by-master']) run.waiting = null;
+    if (opts.autonomous) run.autonomy = { enabled: true, since: ctx.now(), reviewsAtStart: run.reviews?.length ?? 0, verificationsAtStart: run.verifications?.length ?? 0 };
     saveRun(ctx, run);
     appendEvent(ctx, run, {
       type: opts.phase === 'plan' ? 'REQUIREMENTS_CONFIRMED' : 'DESIGN_CONFIRMED',
       status: run.phase,
-      actor: 'master',
+      actor: opts['by-master'] ? 'master-ai' : 'master',
       summary,
-      reason: `사용자 답변: ${text.slice(0, 300)}`,
+      reason: opts['by-master'] ? text.slice(0, 300) : `사용자 답변: ${text.slice(0, 300)}`,
       nextAction: opts.phase === 'plan' ? '설계 문서와 작업 목록을 작성한다.' : '작업 순서대로 개발한다.',
-      data: opts.phase === 'plan' ? { requirements: run.approvals.plan.requirementIds.length } : { tasks: run.approvals.design.order.length },
+      data: opts.phase === 'plan' ? { requirements: run.approvals.plan.requirementIds.length, autonomous: !!opts.autonomous } : { tasks: run.approvals.design.order.length, byMaster: !!opts['by-master'] },
     });
-    return { ok: true, message: `${summary}\n다음 단계: ${PHASE_LABELS[run.phase]}` };
+    const lines = [summary, `다음 단계: ${PHASE_LABELS[run.phase]}`];
+    if (opts.autonomous) {
+      const allow = loadAutonomy(ctx);
+      lines.push('자율 진행: master 가 설계·개발·검수·검증을 진행하고, 필요할 때만 사용자를 부른다 (aiwf-autopilot).');
+      if (!allow.approved) lines.push('[주의] 허용 명령(autonomy.json)이 승인되지 않았다. 검사 명령마다 권한 확인이 떠서 사용자를 부르게 된다. autonomy-set 으로 먼저 정한다.');
+    }
+    return { ok: true, message: lines.join('\n') };
   });
+}
+
+// 설계 문서가 승인 조건을 갖췄는지 저장하지 않고 확인한다 (설계 에이전트가 끝내기 전에 스스로 확인).
+export async function cmdDesignCheck(ctx, opts) {
+  requireValidConfig(ctx);
+  const run = structuredClone(resolveRun(ctx, opts));
+  if (run.phase !== 'DESIGN') throw blocked('WRONG_PHASE', `설계 단계가 아니다 (현재 ${PHASE_LABELS[run.phase]}).`);
+  const summary = approveDesign(ctx, run, '[설계 검사]');
+  return { ok: true, message: `설계 검사 통과 (승인은 하지 않았다): ${summary.replace(/^설계 승인 #\d+: /, '')}` };
 }
 
 // ---------- 명령: status ----------
@@ -330,7 +371,8 @@ function describeRun(ctx, run) {
   const lines = [`${run.featureId} ${run.runId} "${run.title}" — ${PHASE_LABELS[run.phase] ?? run.phase}`];
   const { plan, design } = run.approvals;
   lines.push(`  기획 승인: ${plan ? `#${plan.seq} 명세 ${plan.version} (${plan.approvedAt})` : '없음'}`);
-  lines.push(`  설계 승인: ${design ? `#${design.seq} 설계 ${design.version}, 작업 ${design.order.length}개` : '없음'}`);
+  lines.push(`  설계 승인: ${design ? `#${design.seq} 설계 ${design.version}, 작업 ${design.order.length}개${design.by === 'master' ? ' (master 판단)' : ''}` : '없음'}`);
+  if (run.autonomy?.enabled) lines.push(`  자율 진행: ${run.waiting ? `사용자 대기 — ${run.waiting.kind}: ${run.waiting.summary}` : 'master 진행 중'}`);
   for (const d of detectApprovalDrift(ctx, run)) {
     lines.push(`  ! 승인 이후 변경: ${d.reason} — 다음 명령에서 ${d.approval === 'plan' ? '기획·설계' : '설계'} 승인이 무효화된다`);
   }

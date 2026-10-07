@@ -197,6 +197,38 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 - 전송 실패는 기능 상태를 바꾸지 않는다. 수신 여부가 불명확한 알림은 자동으로 다시 보내지 않는다 (`--retry-uncertain`).
 - Windows 가 아니면 보내지 않고 `UNSUPPORTED_PLATFORM` 으로 남긴다.
 
+## 자율 진행 (플러그인)
+
+사용자는 master(Claude Code 세션)와 기획만 끝내고 자리를 비운다. master 가 설계·개발·검수·검증을 혼자 진행하고, 사용자는 필요할 때만 Slack 멘션으로 불린다.
+
+```
+사용자 ↔ master: 기획 논의 → 기획 승인 + "자율 진행으로 맡긴다"   (approve --phase plan --autonomous)
+master 혼자:     설계(aiwf-designer 에이전트) → master 설계 승인 (approve --phase design --by-master --reason)
+                 → 작업마다 개발(aiwf-developer 에이전트) → Codex 검수 → 지적 고침 → 검증
+멘션:            막힐 때 · 끝났을 때 (완료 보고 + 확정 요청)
+사용자:          돌아와서 확정 → master 가 문서 마무리
+```
+
+- **떠나기 전 준비 (사용자 승인)**: 프로젝트 검사(`checks-set`)와 허용 명령(`autonomy-suggest` → `autonomy-set`, `.ai-workflow/autonomy.json`).
+  자율 진행 중에는 파일 수정과 허용 명령, 엔진 명령(`--user-confirmed` 없는 것)만 권한 확인 없이 실행된다 (`PermissionRequest` 훅).
+- **master 가 하지 않는 것**: 사용자 몫의 명령(`--user-confirmed` 가 붙는 모든 명령), `requirements.md` 수정.
+- **사용자를 부르는 때 (멘션)** — 그 기능은 "사용자 대기" 가 되고, 사용자 답으로 `resume` 하거나 사용자 명령(확정 등)이 대기를 끝낸다.
+
+  | 경우 | 누가 부르나 |
+  |---|---|
+  | 권한 확인창이 떠서 멈춤 | `Notification` 훅 (어떤 명령인지 함께) |
+  | 입력을 기다리며 멈춤 / 진행 없이 거듭 멈춤 | `Notification`·`Stop` 훅 |
+  | 검수 지적이 상한(`AIWF_AUTO_MAX_REVIEW_ROUNDS`, 기본 3)을 넘음 | 엔진 |
+  | 검증이 연속 상한(`AIWF_AUTO_MAX_VERIFY_FAILURES`, 기본 3)만큼 실패 | 엔진 |
+  | Codex 로그인 문제, 검수 연속 실패 | 엔진 |
+  | 요구사항이 바뀌어 기획 승인이 풀림 | 엔진 |
+  | 기획이 이상함, 더 진행할 수 없음 | master (`escalate --kind plan|blocked`) |
+  | 모두 끝남: 완료 보고 + 확정 요청 (사람이 볼 manual 테스트 포함) | 엔진 |
+
+- **멘션 없는 알림**: 시작·진행·완료와 master 가 스스로 처리하는 일 (예: `🔵 검수 | 진행 — Codex 지적 2건, master 가 고치는 중 (1/3)`).
+- `Stop` 훅이 master 가 멈추려 하면 다음 할 일을 알려 이어가게 한다. 새 진행 없이 3번 멈추면 사용자를 부른다.
+- 자율 진행은 플러그인의 에이전트·세션 훅이 있어야 해서 플러그인으로만 쓴다 (`install.mjs` 설치에는 `aiwf-autopilot` 이 없다).
+
 ## Claude Code 스킬
 
 | 스킬 | 언제 |
@@ -209,8 +241,9 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 | `/aiwf-review` | `review`, 지적 정리, `task-reopen` 또는 `review-accept` |
 | `/aiwf-verify` | `checks-set`, `verify`, manual 테스트 `test-confirm`, `confirm` |
 | `/aiwf-docs` | 문서 작성, `docs-done` |
+| `/aiwf-autopilot` | 자율 진행: 기획 승인 뒤 설계·개발·검수·검증을 master 가 혼자 진행, 필요할 때만 `escalate` (플러그인 전용) |
 
-승인(`approve`, `checks-set`, `review-accept`, `test-confirm`, `confirm`, `--extra-approved`, `--no-docs-approved`)은 사용자가 대화에서 명시적으로 진행을 말한 뒤에만, 그 답변 원문으로 실행한다.
+승인(`approve`, `checks-set`, `autonomy-set`, `review-accept`, `test-confirm`, `confirm`, `resume`, `--extra-approved`, `--no-docs-approved`)은 사용자가 대화에서 명시적으로 진행을 말한 뒤에만, 그 답변 원문으로 실행한다.
 
 종료 코드: 0 성공, 1 오류, 2 사용법, 3 차단, 4 잠금.
 

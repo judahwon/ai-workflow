@@ -4,7 +4,40 @@
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/engine/hook.mjs\"" }
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/engine/hook.mjs\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/engine/session-hook.mjs\" PermissionRequest"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/engine/session-hook.mjs\" Stop"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/engine/session-hook.mjs\" Notification"
+          }
         ]
       }
     ]

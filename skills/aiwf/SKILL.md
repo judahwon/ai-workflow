@@ -1,6 +1,6 @@
 ---
 name: aiwf
-description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새 기능 개발·기능 논의·"워크플로로 진행"을 요청하거나, 진행 중인 기능(FEAT-###)을 이어 갈 때 쓴다. 현재 단계를 확인하고 단계별 스킬(aiwf-setup, aiwf-discuss, aiwf-design, aiwf-develop, aiwf-review, aiwf-verify, aiwf-docs)로 넘긴다.
+description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새 기능 개발·기능 논의·"워크플로로 진행"을 요청하거나, 진행 중인 기능(FEAT-###)을 이어 갈 때 쓴다. 현재 단계를 확인하고 단계별 스킬(aiwf-setup, aiwf-discuss, aiwf-design, aiwf-develop, aiwf-review, aiwf-verify, aiwf-docs) 또는 자율 진행(aiwf-autopilot)으로 넘긴다.
 ---
 
 # ai-workflow 시작점
@@ -20,6 +20,8 @@ description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새
 |---|---|
 | 설정 없음·오류, git 제외 문제 | `aiwf-setup` |
 | 사용자가 새 기능을 말함 | `aiwf-discuss` (`new` 부터) |
+| `자율 진행: master 진행 중` | `aiwf-autopilot` (사용자 없이 이어간다) |
+| `자율 진행: 사용자 대기` | 대기 이유를 사용자에게 보여주고 함께 정한다. 답을 받으면 `resume` 후 `aiwf-autopilot` |
 | 단계: 논의·기획 | `aiwf-discuss` |
 | 단계: 설계 | `aiwf-design` |
 | 단계: 개발 | `aiwf-develop` |

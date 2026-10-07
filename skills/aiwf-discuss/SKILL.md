@@ -39,12 +39,26 @@ node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" new --title "<사용자가 말한 �
 
 ## 5. 기획 승인
 
-1. 요구사항 요약(REQ 목록, 범위 밖, 결정 사항)을 사용자에게 보여주고 진행해도 되는지 묻는다.
-2. 사용자가 진행을 명시적으로 말하면, 그 답변 **원문 그대로** 승인한다.
+1. 요구사항 요약(REQ 목록, 범위 밖, 결정 사항)을 사용자에게 보여준다.
+2. **AskUserQuestion** 으로 진행 방식을 묻는다.
+   - "자율 진행으로 맡긴다 (권장)": master 가 설계·개발·검수·검증을 혼자 하고, 막힐 때와 끝났을 때만 Slack 멘션으로 부른다.
+   - "단계마다 같이 진행": 설계 승인·검수 판단·확정을 사용자와 함께 한다.
+   - "아직 승인하지 않음": 논의를 이어간다.
+3. 자율 진행을 고르면, 사용자가 떠나기 전에 사용자 몫인 준비를 끝낸다. 둘 다 사용자 승인이 필요하다.
+   - **프로젝트 검사(checks.json)**: 없거나 승인이 풀렸으면 `aiwf-verify` 의 checks-set 절차로 정한다. http·browser 테스트가 필요할 서버 주소(origins)도 여기서 넣는다.
+   - **허용 명령(autonomy.json)**: `node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" autonomy-suggest` 의 후보를 AskUserQuestion(multiSelect)으로 보여주고,
+     고른 접두사를 `{"allow": [...]}` JSON 파일(프로젝트 밖 임시 폴더)로 써서 저장한다.
+     ```bash
+     node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" autonomy-set --from <임시 JSON> --approval-text "<사용자 답변 원문>" --user-confirmed
+     ```
+     자리를 비운 동안 이 목록 밖의 명령은 권한 확인이 떠서 사용자를 부르게 된다고 알린다. 엔진 명령은 따로 넣지 않아도 된다.
+   - Slack 알림이 꺼져 있으면 부를 방법이 없다고 알리고, 켤지 묻는다 (`aiwf-setup`).
+4. 사용자가 고른 답변 **원문 그대로** 승인한다. 자율 진행이면 `--autonomous` 를 붙인다.
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" approve --feature FEAT-### --phase plan --approval-text "<사용자 답변 원문>" --user-confirmed
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" approve --feature FEAT-### --phase plan --approval-text "<사용자 답변 원문>" --user-confirmed [--autonomous]
    ```
-3. 막히면(`REQUIREMENTS_EMPTY`, `OPEN_QUESTIONS` 등) 메시지대로 문서를 고치고 다시 확인받는다.
-4. 승인되면 `aiwf-design` 으로 넘어간다.
+5. 막히면(`REQUIREMENTS_EMPTY`, `OPEN_QUESTIONS` 등) 메시지대로 문서를 고치고 다시 확인받는다.
+6. 승인되면 자율 진행은 `aiwf-autopilot`, 함께 진행은 `aiwf-design` 으로 넘어간다.
+   자율 진행이면 "이제 자리를 비우셔도 됩니다. 필요할 때 Slack 으로 부르겠습니다." 라고 알리고 바로 시작한다.
 
 승인 뒤 `requirements.md` 를 고치면 기획·설계 승인이 모두 풀리고 이 단계로 돌아온다. 고칠 때는 사용자에게 먼저 알린다.

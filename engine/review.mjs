@@ -10,6 +10,7 @@ import { appendEvent, runDir } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
 import { resolveRun, saveRun, syncApprovals, driftBlocked, PHASE_LABELS } from './runs.mjs';
 import { reviewFindingsDecision, reviewErrorDecision } from './decisions.mjs';
+import { escalate, isAutonomous, autonomyLimits } from './autonomy.mjs';
 import { featureDir } from './documents.mjs';
 import { buildInvocation } from './process.mjs';
 import { workspaceFingerprint, diffSince } from './scope.mjs';
@@ -225,7 +226,9 @@ export async function cmdReview(ctx, opts) {
       const auth = interpretCodexAuth(await ctx.runProcess({ ...status, cwd: ctx.projectRoot, env, input: '', timeoutMs: AUTH_TIMEOUT_MS }));
       if (!auth.ok) {
         const decision = reviewErrorDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, code: auth.code });
-        appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${auth.message}`, reason: auth.code, nextAction: '로그인 후 다시 review 한다.', decision });
+        // 로그인은 master 가 고칠 수 없다. 자율 진행이면 사용자를 부른다.
+        if (isAutonomous(run)) escalate(ctx, run, { kind: 'blocked', type: 'REVIEW_FAILED', summary: `Codex 검수를 실행할 수 없다: ${auth.message}`, decision, fields: { reason: auth.code } });
+        else appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${auth.message}`, reason: auth.code, nextAction: '로그인 후 다시 review 한다.', decision });
         throw blocked(auth.code, `${auth.message} API 키를 쓰려면 project.env 의 AIWF_REVIEW_AUTH 를 any 로 바꾼다 (init).`, { decision });
       }
     }
@@ -238,6 +241,17 @@ export async function cmdReview(ctx, opts) {
     const outcome = interpret(proc, run.approvals.plan.requirementIds);
     if (!outcome.ok) {
       const decision = reviewErrorDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, code: outcome.code });
+      if (isAutonomous(run)) {
+        // 형식 오류·일시 장애는 master 가 다시 돌린다. 연속 2번이면 사용자를 부른다.
+        run.autonomy.reviewFailures = (run.autonomy.reviewFailures ?? 0) + 1;
+        if (run.autonomy.reviewFailures >= 2) {
+          escalate(ctx, run, { kind: 'blocked', type: 'REVIEW_FAILED', summary: `Codex 검수가 연속 ${run.autonomy.reviewFailures}번 실패했다 (${outcome.code}).`, decision, fields: { reason: outcome.code } });
+          throw blocked(outcome.code, `${outcome.message} 연속 실패라 사용자를 불렀다.`, { decision });
+        }
+        saveRun(ctx, run);
+        appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${outcome.message}`, reason: outcome.code, nextAction: 'review 를 한 번 더 실행한다.' });
+        throw blocked(outcome.code, `${outcome.message} 자율 진행: review 를 한 번 더 실행한다.`);
+      }
       appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${outcome.message}`, reason: outcome.code, nextAction: '원인을 해결해 다시 review 하거나, 사용자 허락으로 review-accept 한다.', decision });
       throw blocked(outcome.code, `${outcome.message} 사용자 허락이 있으면 review-accept 로 넘길 수 있다.`, { decision });
     }
@@ -252,17 +266,36 @@ export async function cmdReview(ctx, opts) {
       run.reviewOutcome = null;
       run.phase = 'REVIEW';
     }
-    saveRun(ctx, run);
     const high = review.findings.filter((f) => f.severity === 'high').length;
-    const decision = review.verdict === 'APPROVED' ? null : reviewFindingsDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, findings: review.findings.length, high });
-    appendEvent(ctx, run, {
+    let decision = review.verdict === 'APPROVED' ? null : reviewFindingsDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, findings: review.findings.length, high });
+    const auto = isAutonomous(run);
+    let round = null;
+    let max = null;
+    let escalated = false;
+    if (auto) {
+      run.autonomy.reviewFailures = 0;
+      max = autonomyLimits(ctx).maxReviewRounds;
+      round = run.reviews.slice(run.autonomy.reviewsAtStart ?? 0).filter((r) => r.verdict !== 'APPROVED').length;
+      if (decision && round >= max) {
+        escalated = true;
+        escalate(ctx, run, {
+          kind: 'limit', type: 'REVIEW_DONE', decision,
+          summary: `Codex 지적이 ${round}번째다 (상한 ${max}). 지적 ${review.findings.length}건 (중요 ${high}).`,
+          fields: { status: review.verdict, actor: 'reviewer', data: { findings: review.findings.length, high, round, max }, evidencePaths: [`runs/${run.runId}/reviews/${name}.json`] },
+        });
+      } else {
+        decision = null;
+      }
+    }
+    if (!escalated) saveRun(ctx, run);
+    if (!escalated) appendEvent(ctx, run, {
       type: 'REVIEW_DONE', status: review.verdict, actor: 'reviewer',
-      data: { findings: review.findings.length, high },
+      data: { findings: review.findings.length, high, round, max },
       decision,
       summary: `검수 ${name}: ${review.verdict} — ${review.summary.slice(0, 300)}`,
       reason: review.findings.length ? `지적 ${review.findings.length}건 (high ${review.findings.filter((f) => f.severity === 'high').length})` : null,
       evidencePaths: [`runs/${run.runId}/reviews/${name}.json`],
-      nextAction: review.verdict === 'APPROVED' ? 'verify 로 검증한다.' : '지적을 사용자와 확인하고 task-reopen 으로 고치거나 review-accept 한다.',
+      nextAction: review.verdict === 'APPROVED' ? 'verify 로 검증한다.' : auto ? `master 가 지적을 고친다 (${round}/${max}): task-reopen → 개발 에이전트로 고치기 → task-done → review.` : '지적을 사용자와 확인하고 task-reopen 으로 고치거나 review-accept 한다.',
     });
     const lines = [
       `검수 ${name} (요청 모델 ${values.AIWF_REVIEW_MODEL}, 실제 모델은 확인 불가): ${review.verdict}`,
@@ -291,6 +324,7 @@ export async function cmdReviewAccept(ctx, opts) {
     if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `검수 단계가 아니다 (현재 ${PHASE_LABELS[run.phase]}).`);
     const last = run.reviews?.at(-1) ?? null;
     run.reviewOutcome = { type: 'ACCEPTED', reviewSeq: last?.seq ?? null, at: ctx.now(), fingerprint: workspaceFingerprint(ctx), approvalText: text };
+    run.waiting = null; // 사용자가 돌아와 답했다 (자율 진행 대기 해제)
     run.phase = 'VERIFY';
     saveRun(ctx, run);
     appendEvent(ctx, run, {
