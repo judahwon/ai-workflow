@@ -218,6 +218,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   assert.match(r.out, /CHANGES_REQUESTED[\s\S]*\[high\] src\/pages\/orders\/List\.tsx:3 빈 결과 처리 없음/);
   const call = extra.runProcess.calls[0];
   assert.match(call.text, /exec --sandbox read-only .*--model gpt-6\.1-sol/);
+  assert.equal(call.text.includes('windows.sandbox=unelevated'), process.platform === 'win32', 'Windows 에서만 읽기 샌드박스를 켠다');
   const prompt = fs.readFileSync(path.join(p.workflowRoot, 'runs', loadRun(p).runId, 'reviews', 'R001-prompt.md'), 'utf8');
   assert.match(prompt, /List\.tsx \(새 파일\)\r?\nv1/, '프롬프트에 바뀐 내용이 들어간다');
   assert.match(prompt, /REQ-002/);

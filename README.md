@@ -117,6 +117,7 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 - **검수**: `AIWF_CODEX_BIN exec --sandbox read-only --json --ignore-user-config --ephemeral --model AIWF_REVIEW_MODEL -C <루트> -` 에
   요구사항·설계·작업 계약·바뀐 파일·diff 를 넘기고, REQ 마다 MET/NOT_MET/UNVERIFIED 와 지적을 담은 JSON 을 받는다.
   형식이 틀리거나 파일 변경을 시도하면 결과로 인정하지 않는다. 요청 모델은 기록하지만 실제 응답 모델은 확인할 수 없다.
+  Windows 에서는 `-c windows.sandbox=unelevated` 를 더한다. 사용자 설정을 무시하면 샌드박스가 없어 파일 읽기 명령까지 거부되기 때문이다 (쓰기는 계속 막힌다).
 - **검수 인증**: 기본(`AIWF_REVIEW_AUTH=chatgpt`)은 ChatGPT 구독 로그인만 쓴다. 검수 전에 `codex login status` 로 ChatGPT 로그인을 확인하고,
   아니면(API 키 로그인·미로그인) 막는다. `OPENAI_API_KEY` 등 API 키 환경변수는 검수자에게 넘기지 않는다. API 키 과금을 허용하려면 `any`.
 - **프로젝트 검사** (`checks.json`): 린트·빌드·단위 테스트 명령과 http·browser 테스트가 쓰는 서버 주소(`origins`).

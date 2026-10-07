@@ -227,8 +227,10 @@ export async function cmdReview(ctx, opts) {
         throw blocked(auth.code, `${auth.message} API 키를 쓰려면 .env 의 AIWF_REVIEW_AUTH 를 any 로 바꾼다.`);
       }
     }
+    // Windows 는 사용자 설정을 무시하면 샌드박스가 없어 읽기 명령까지 정책으로 거부된다. unelevated 샌드박스는 읽기만 허용한다.
+    const sandbox = ctx.platform === 'win32' ? ['-c', 'windows.sandbox=unelevated'] : [];
     const invocation = buildInvocation(values.AIWF_CODEX_BIN, [
-      'exec', '--sandbox', 'read-only', '--json', '--ignore-user-config', '--ephemeral', '--model', values.AIWF_REVIEW_MODEL, '-C', ctx.projectRoot, '-',
+      'exec', '--sandbox', 'read-only', ...sandbox, '--json', '--ignore-user-config', '--ephemeral', '--model', values.AIWF_REVIEW_MODEL, '-C', ctx.projectRoot, '-',
     ], { env, platform: ctx.platform });
     const proc = await ctx.runProcess({ ...invocation, cwd: ctx.projectRoot, env, input: prompt, timeoutMs: REVIEW_TIMEOUT_MS });
     const outcome = interpret(proc, run.approvals.plan.requirementIds);
