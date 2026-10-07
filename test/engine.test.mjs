@@ -114,6 +114,18 @@ test('install: 스킬을 .claude/skills 에 두고 훅은 기존 설정을 지�
   assert.equal(fs.readFileSync(settingsFile, 'utf8'), '{ 깨진 json', '해석할 수 없으면 건드리지 않는다');
 });
 
+test('install: .ai-workflow 를 제외하지 않은 린터 설정을 알린다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'eslint.config.js'), "export default [{ ignores: ['dist/'] }];\n");
+    fs.writeFileSync(path.join(dir, '.prettierrc.json'), '{}\n');
+    fs.writeFileSync(path.join(dir, 'biome.json'), '{"files":{"ignore":[".ai-workflow/"]}}\n');
+    assert.deepEqual(install(dir, { claude: false }).linters, ['eslint', 'prettier']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('install --no-claude: .claude 를 만들지 않는다', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
   try {

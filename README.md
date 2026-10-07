@@ -14,6 +14,9 @@ node install.mjs <프로젝트 루트> --upgrade  # 엔진·스킬만 교체 (.e
 node install.mjs <프로젝트 루트> --no-claude # .claude/ (스킬·훅)는 건드리지 않음
 ```
 
+프로젝트 린터(eslint·prettier·biome)가 `.ai-workflow/` 를 검사하면 엔진 파일 때문에 lint 검사가 실패한다.
+설치가 이를 알리면 린터 제외 목록에 `.ai-workflow/` 를 넣는다.
+
 프로젝트에 생기는 것:
 
 ```

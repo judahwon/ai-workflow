@@ -80,6 +80,20 @@ export function registerHook(root) {
   return 'added';
 }
 
+const LINTER_CONFIGS = [
+  ['eslint', /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.[a-z]+)?)$/],
+  ['prettier', /^(prettier\.config\.[cm]?[jt]s|\.prettierrc(\.[a-z]+)?)$/],
+  ['biome', /^biome\.jsonc?$/],
+];
+
+// 프로젝트 린터가 엔진 파일까지 검사하면 프로젝트 검사(checks)가 엔진 때문에 실패한다.
+export function lintersNeedingIgnore(root) {
+  const names = fs.readdirSync(root);
+  return LINTER_CONFIGS
+    .filter(([, pattern]) => names.some((n) => pattern.test(n) && !fs.readFileSync(path.join(root, n), 'utf8').includes('.ai-workflow')))
+    .map(([tool]) => tool);
+}
+
 export function install(projectRoot, { upgrade = false, claude = true } = {}) {
   const root = path.resolve(projectRoot);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`프로젝트 폴더가 없다: ${root}`);
@@ -101,7 +115,7 @@ export function install(projectRoot, { upgrade = false, claude = true } = {}) {
   writeEnvExample(workflowRoot);
   const skills = claude ? installSkills(root) : [];
   const hook = claude ? registerHook(root) : 'disabled';
-  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook };
+  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook, linters: lintersNeedingIgnore(root) };
 }
 
 const HOOK_MESSAGES = {
@@ -125,6 +139,7 @@ function main(argv) {
       `  엔진 파일 ${r.engineFiles}개, 새 템플릿 ${r.templateFiles}개${r.ignoreAdded.length ? `, .gitignore 추가: ${r.ignoreAdded.join(' ')}` : ''}`,
       ...(r.skills.length ? [`  스킬: ${r.skills.map((n) => `.claude/skills/${n}`).join(', ')}`] : []),
       `  ${HOOK_MESSAGES[r.hook]}`,
+      ...(r.linters.length ? [`  [주의] ${r.linters.join(', ')} 설정에 .ai-workflow/ 제외가 없다. 엔진 파일까지 검사하면 프로젝트 검사가 실패하므로 제외 목록에 .ai-workflow/ 를 넣는다`] : []),
       '',
       '다음 단계 (프로젝트 루트에서):',
       '  node .ai-workflow/engine/cli.mjs init      # 프로젝트·개인 설정 질의 → .ai-workflow/.env',
