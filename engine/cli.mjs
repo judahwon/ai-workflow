@@ -6,6 +6,7 @@ import { WorkflowError, usageError } from './util.mjs';
 import { createContext } from './context.mjs';
 import { cmdInit, cmdQuestions } from './init.mjs';
 import { cmdNew, cmdApprove, cmdStatus, cmdUnlock } from './runs.mjs';
+import { cmdTaskStart, cmdTaskDone, cmdTaskPause, cmdCheckScope } from './develop.mjs';
 
 const S = 'string';
 const B = 'boolean';
@@ -18,6 +19,10 @@ export const COMMANDS = {
   status: { options: { run: S, feature: S, all: B, json: B }, run: cmdStatus },
   new: { options: { title: S, feature: S }, run: cmdNew },
   approve: { options: { run: S, feature: S, phase: S, 'approval-text': S, 'user-confirmed': B }, run: cmdApprove },
+  'task-start': { options: { run: S, feature: S, task: S }, run: cmdTaskStart },
+  'task-done': { options: { run: S, feature: S, task: S, summary: S, 'extra-approved': S, 'user-confirmed': B }, run: cmdTaskDone },
+  'task-pause': { options: {}, run: cmdTaskPause },
+  'check-scope': { options: { path: S }, run: cmdCheckScope },
   unlock: { options: { stale: B, reason: S, 'force-unverified': B }, run: cmdUnlock },
 };
 
@@ -37,6 +42,17 @@ export const HELP = `사용: node .ai-workflow/engine/cli.mjs <command> [options
       design: design.md + tasks.json 승인 (모든 REQ 가 작업에 연결돼야 함) → 개발 단계
       사용자가 대화에서 실제로 진행을 확인한 뒤에만 실행한다.
   status [--run RUN | --feature FEAT] [--all] [--json]
+
+개발
+  task-start (--run RUN | --feature FEAT) --task TASK-###
+      작업을 시작(또는 재개)한다. 의존 작업이 끝나야 하고, 진행 중인 작업은 하나뿐이다.
+      이후 파일 수정 훅이 이 작업의 allowedFiles 밖 수정을 막는다.
+  task-done (--run RUN | --feature FEAT) --task TASK-### --summary "<변경·확인 내용>"
+            [--extra-approved "<사용자 답변 원문>" --user-confirmed]
+      git 기준으로 작업 중 바뀐 파일을 확인한다. 범위 밖 파일이 있으면 막는다.
+      모든 작업이 끝나면 검수 단계로 간다.
+  task-pause                진행 중인 작업을 일시 중지하고 수정 범위 제한을 푼다.
+  check-scope --path <파일>  지금 이 파일을 고칠 수 있는지 (훅과 같은 판단)
 
 관리
   unlock --stale --reason "<확인 내용>" [--force-unverified]
