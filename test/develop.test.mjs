@@ -140,10 +140,14 @@ test('task-done: git 으로 범위 밖 변경을 잡고, 사용자 허락으로�
   await p.run('task-start', ...F, '--task', 'TASK-001');
   writeSource(p, 'src/pages/orders/List.tsx');
   writeSource(p, 'src/other.ts');
+  // 작업 도중 install --upgrade 가 바꾸는 파일
+  writeSource(p, '.ai-workflow/engine/cli.mjs', '// upgraded');
+  writeSource(p, '.claude/skills/aiwf-docs/SKILL.md', 'upgraded');
   let r = await p.run('task-done', ...F, '--task', 'TASK-001', '--summary', '목록 추가');
   assert.equal(r.code, 3);
   assert.match(r.out, /OUT_OF_SCOPE/);
   assert.match(r.out, /src\/other\.ts/);
+  assert.doesNotMatch(r.out, /engine\/cli\.mjs|aiwf-docs/, '설치기가 바꾸는 파일은 작업의 변경이 아니다');
   assert.doesNotMatch(r.out, /notes\/before\.md/, '시작 전 변경은 이 작업의 변경이 아니다');
   r = await p.run('task-done', ...F, '--task', 'TASK-001', '--summary', '목록 추가', '--extra-approved', '괜찮아');
   assert.equal(r.code, 2, '--user-confirmed 필요');

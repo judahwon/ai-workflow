@@ -95,15 +95,22 @@ export function captureBaseline(ctx) {
   return { base, dirty };
 }
 
+// 설치기(install --upgrade)가 교체하는 파일. 작업 도중 엔진을 올려도 작업의 변경으로 세지 않는다.
+const INSTALLER_OWNED = ['.ai-workflow/engine/', '.ai-workflow/templates/', '.ai-workflow/VERSION', '.ai-workflow/.env.example', '.claude/skills/aiwf'];
+
+export function isInstallerOwned(rel) {
+  return INSTALLER_OWNED.some((prefix) => rel.startsWith(prefix));
+}
+
 // 작업 시작 이후 이 작업이 바꾼 파일. 시작 전부터 바뀌어 있던 파일은 내용이 또 바뀐 경우만 센다.
 export function changedSinceBaseline(ctx, baseline) {
-  const now = changedSince(ctx, baseline.base);
+  const now = changedSince(ctx, baseline.base).filter((rel) => !isInstallerOwned(rel));
   const result = new Set();
   for (const rel of now) {
     if (!(rel in baseline.dirty) || baseline.dirty[rel] !== fileHash(ctx.projectRoot, rel)) result.add(rel);
   }
   // 시작 전에 바뀌어 있었는데 지금은 원래대로 돌아간 파일도 이 작업이 건드린 것이다.
-  for (const rel of Object.keys(baseline.dirty)) if (!now.includes(rel)) result.add(rel);
+  for (const rel of Object.keys(baseline.dirty)) if (!now.includes(rel) && !isInstallerOwned(rel)) result.add(rel);
   return [...result].sort();
 }
 
