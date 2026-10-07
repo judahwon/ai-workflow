@@ -24,5 +24,6 @@ description: ai-workflow 문서 단계(DOCS). 확정된 기능을 프로젝트 �
      `--no-docs-approved "<사용자 답변 원문>" --user-confirmed`
    - `OUT_OF_SCOPE`: 확정 이후 문서 폴더 밖 파일이 바뀌었다. 되돌리거나, 사용자 허락을 받아
      `--extra-approved "<사용자 답변 원문>" --user-confirmed` 로 넘긴다. 코드 수정이 필요했다면 그 사실을 분명히 알린다.
+     루트 README·CLAUDE.md 처럼 문서 폴더 밖 문서만 고치는 것도 같은 방법으로 넘기고, 보고서에 허락받은 문서로 남는다.
 5. 완료되면 엔진이 `.ai-workflow/features/FEAT-###/report.md` (승인·작업·검수·검증·확정·문서 요약)를 만든다.
    결과를 사용자에게 요약하고, 커밋은 프로젝트 규칙에 따라 사용자 확인 후에 한다.

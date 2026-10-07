@@ -64,7 +64,9 @@ export function renderReport(ctx, run) {
     for (const r of verification.results) lines.push(`  - ${r.status} ${r.id} ${r.title}${r.required ? '' : ' (optional)'}`);
   } else lines.push(`- ${L.none}`);
   lines.push('', `## ${L.confirm}`, `- ${run.confirmation?.confirmedAt ?? '-'}: "${run.confirmation?.approvalText ?? ''}"`);
-  lines.push('', `## ${L.docs}`, ...((run.docs?.files ?? []).length ? run.docs.files.map((f) => `- ${f}`) : [`- ${L.none}`]));
+  const docExtra = run.docs?.extraApproved?.files ?? [];
+  lines.push('', `## ${L.docs}`, ...((run.docs?.files ?? []).length ? run.docs.files.map((f) => `- ${f}`) : docExtra.length ? [] : [`- ${L.none}`]));
+  if (docExtra.length) lines.push(...docExtra.map((f) => `- ${f} (${L.extra})`));
   if (values.AIWF_ORGANIZATION_NOTICE) lines.push('', '---', values.AIWF_ORGANIZATION_NOTICE);
   return `${lines.join('\n')}\n`;
 }
@@ -93,8 +95,9 @@ export async function cmdDocsDone(ctx, opts) {
           '확정한 코드가 바뀐 것이다. 되돌리거나, 사용자 허락을 받아 --extra-approved "<사용자 답변 원문>" --user-confirmed 로 다시 실행한다.',
         ].join('\n'));
       }
-      if (inScope.length === 0 && !noDocsText) {
-        throw blocked('DOCS_EMPTY', `${docsDir}/ 아래에 바뀐 문서가 없다. 문서를 쓰거나, 문서가 필요 없다는 사용자 답변을 --no-docs-approved 로 남긴다.`);
+      // 루트 README·CLAUDE.md 처럼 문서 폴더 밖 문서만 고친 경우도 사용자가 허락했으면 문서 작업으로 본다.
+      if (inScope.length === 0 && outOfScope.length === 0 && !noDocsText) {
+        throw blocked('DOCS_EMPTY', `바뀐 문서가 없다. ${docsDir}/ 아래(또는 사용자 허락을 받아 그 밖)에 문서를 쓰거나, 문서가 필요 없다는 사용자 답변을 --no-docs-approved 로 남긴다.`);
       }
       docFiles = inScope;
       if (outOfScope.length) run.docs.extraApproved = { files: outOfScope, approvalText: redact(extraText).slice(0, 2000) };
