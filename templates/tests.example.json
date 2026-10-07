@@ -1,0 +1,48 @@
+{
+  "tests": [
+    {
+      "id": "TEST-001",
+      "title": "주문 필터 단위 테스트",
+      "kind": "command",
+      "requirementIds": ["REQ-001"],
+      "command": "npm test -- orders",
+      "cwd": "."
+    },
+    {
+      "id": "TEST-002",
+      "title": "상태 필터 API 응답",
+      "kind": "http",
+      "requirementIds": ["REQ-001"],
+      "request": {
+        "origin": "api",
+        "method": "GET",
+        "path": "/api/orders?status=DONE",
+        "headers": { "Authorization": { "fromEnv": "AIWF_TEST_API_TOKEN" } }
+      },
+      "expect": { "status": 200, "contentType": "application/json", "json": [{ "path": "content.0.status", "equals": "DONE" }] }
+    },
+    {
+      "id": "TEST-003",
+      "title": "조회 버튼을 눌러야 목록이 바뀐다",
+      "kind": "browser",
+      "requirementIds": ["REQ-002"],
+      "origin": "app",
+      "steps": [
+        { "action": "goto", "path": "/orders" },
+        { "action": "selectOption", "selector": "select[name=status]", "value": "DONE" },
+        { "action": "expectCount", "selector": "[data-testid=order-row]", "count": 20 },
+        { "action": "click", "selector": "button[type=submit]" },
+        { "action": "expectText", "selector": "[data-testid=order-row] >> nth=0", "text": "완료" }
+      ]
+    },
+    {
+      "id": "TEST-004",
+      "title": "인쇄 미리보기 확인",
+      "kind": "manual",
+      "requirementIds": ["REQ-002"],
+      "required": false,
+      "steps": ["목록에서 인쇄 버튼을 누른다.", "미리보기에 필터 조건이 표시되는지 본다."],
+      "expected": "미리보기 상단에 선택한 상태가 표시된다."
+    }
+  ]
+}

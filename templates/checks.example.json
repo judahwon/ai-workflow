@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "origins": {
+    "app": "http://localhost:5173",
+    "api": "http://localhost:8080"
+  },
+  "checks": [
+    { "id": "lint", "title": "린트", "command": "npm run lint" },
+    { "id": "build", "title": "빌드", "command": "npm run build", "timeoutSec": 1200 },
+    { "id": "unit", "title": "단위 테스트", "command": "npm test", "required": true }
+  ]
+}

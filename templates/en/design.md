@@ -14,7 +14,7 @@ Based on spec version: (approved spec version)
 ## Impact and risks
 
 ## Test strategy
-<!-- Which test verifies each REQ. -->
+<!-- Which test verifies each REQ. Test definitions live in tests.json next to this file (every REQ needs at least one required test). -->
 
 ## Task breakdown
 <!-- Tasks live in tasks.json next to this file, each with its allowed edit scope (allowedFiles). -->
