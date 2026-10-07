@@ -206,6 +206,33 @@ export async function cmdTaskDone(ctx, opts) {
   });
 }
 
+// ---------- 명령: task-reopen ----------
+
+// 검수 지적·검증 실패를 고치려고 끝난 작업을 다시 연다. 개발 단계로 돌아가고 검수 결과는 무효가 된다.
+export async function cmdTaskReopen(ctx, opts) {
+  requireValidConfig(ctx);
+  requireEnvIgnored(ctx);
+  const taskId = assertId('task', opts.task);
+  const reason = typeof opts.reason === 'string' ? opts.reason.trim() : '';
+  if (reason.length < 2) throw usageError('--reason "<다시 여는 이유 (검수 지적·실패 테스트 등)>" 가 필요하다.');
+  return withLock(ctx, 'task-reopen', async () => {
+    const run = resolveRun(ctx, opts);
+    const drift = syncApprovals(ctx, run);
+    if (drift.length) throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}).`);
+    if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `작업을 다시 여는 것은 검수·확정 단계에서만 한다 (현재 ${PHASE_LABELS[run.phase]}).`);
+    taskContract(run, taskId);
+    const state = run.tasks[taskId];
+    if (state.status !== 'DONE') throw blocked('TASK_NOT_DONE', `${taskId} 는 완료 상태가 아니다 (${state.status}).`);
+    state.status = 'PENDING';
+    state.reopened = [...(state.reopened ?? []), { at: ctx.now(), reason: redact(reason).slice(0, 1000) }];
+    run.reviewOutcome = null;
+    run.phase = 'DEVELOP';
+    saveRun(ctx, run);
+    appendEvent(ctx, run, { type: 'TASK_REOPENED', taskId, status: 'DEVELOP', summary: `${taskId} 다시 열림`, reason, nextAction: `task-start --task ${taskId} 로 고친다. 끝나면 다시 검수한다.` });
+    return { ok: true, message: `${taskId} 를 다시 열었다. 단계: ${PHASE_LABELS.DEVELOP}. task-start 로 이어서 고친다.` };
+  });
+}
+
 // ---------- 수정 허용 판단 (훅·check-scope 공용) ----------
 
 // 세션이 쓰는 임시·설정 폴더는 프로젝트 밖이어도 막지 않는다.
