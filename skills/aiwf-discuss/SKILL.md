@@ -13,7 +13,7 @@ description: ai-workflow 논의·기획 단계. 새 기능을 시작하거나(ne
 진행 중인 기능이 아니면 만든다.
 
 ```bash
-node .ai-workflow/engine/cli.mjs new --title "<사용자가 말한 기능 이름>"
+node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" new --title "<사용자가 말한 기능 이름>"
 ```
 
 출력의 FEAT-### 와 문서 폴더(`.ai-workflow/features/FEAT-###/`)를 기억한다. 설정이 없다고 막히면 `aiwf-setup` 부터 한다.
@@ -42,7 +42,7 @@ node .ai-workflow/engine/cli.mjs new --title "<사용자가 말한 기능 이름
 1. 요구사항 요약(REQ 목록, 범위 밖, 결정 사항)을 사용자에게 보여주고 진행해도 되는지 묻는다.
 2. 사용자가 진행을 명시적으로 말하면, 그 답변 **원문 그대로** 승인한다.
    ```bash
-   node .ai-workflow/engine/cli.mjs approve --feature FEAT-### --phase plan --approval-text "<사용자 답변 원문>" --user-confirmed
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" approve --feature FEAT-### --phase plan --approval-text "<사용자 답변 원문>" --user-confirmed
    ```
 3. 막히면(`REQUIREMENTS_EMPTY`, `OPEN_QUESTIONS` 등) 메시지대로 문서를 고치고 다시 확인받는다.
 4. 승인되면 `aiwf-design` 으로 넘어간다.

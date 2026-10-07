@@ -6,7 +6,27 @@ Claude Code 와 함께 기능을 **논의 → 기획 → 설계 → 개발 → �
 - 엔진은 관문만 맡는다: 사용자 승인을 문서 해시에 묶고, 문서가 바뀌면 승인을 되돌리고, 상태·이벤트를 기록한다.
 - 의존성 없는 Node.js(20 이상) ESM. npm 설치가 필요 없다.
 
-## 설치
+## 플러그인으로 쓰기 (권장)
+
+Claude Code 안에서:
+
+```
+/plugin marketplace add judahwon/ai-workflow
+/plugin install ai-workflow@ai-workflow
+```
+
+- 엔진·스킬·훅은 플러그인에 있다. 프로젝트에는 `.ai-workflow/` (기능 문서·설정·실행 기록)만 생기고 `.claude/` 는 건드리지 않는다.
+- 프로젝트 루트에서 Claude Code 를 열고 `/ai-workflow:aiwf` 로 시작한다. 처음이면 설정 단계에서 `.ai-workflow/` 를 만든다.
+  저장소에 흔적을 남기지 않으려면 그때 "이 PC 에만"을 고른다 (`init --local`: `.ai-workflow/` 를 `.git/info/exclude` 에만 넣음).
+- 엔진 명령은 `node "<플러그인>/engine/cli.mjs" <command>` 다. 스킬이 경로를 채워 실행하므로 직접 칠 일은 드물다.
+- 프로젝트는 `.ai-workflow/VERSION` 에 마지막으로 다룬 엔진 버전을 남긴다. 팀원의 플러그인이 그보다 오래됐으면 `ENGINE_OUTDATED` 로 막는다 → `/plugin` 에서 업데이트.
+- 이미 `install.mjs` 로 엔진을 넣은 프로젝트(`.ai-workflow/engine/` 있음)에서는 플러그인 엔진·훅이 손대지 않는다.
+  플러그인으로 옮기려면 `.ai-workflow/engine/`·`templates/`(고친 템플릿은 남겨도 됨)·`.claude/skills/aiwf*/` 와 `.claude/settings.json` 의 ai-workflow 훅을 지운다.
+- 개발 중 시험: `claude --plugin-dir <이 저장소>`, 검사: `claude plugin validate .`
+
+## 프로젝트에 직접 설치
+
+플러그인을 쓸 수 없는 환경용. 아래 명령 예시의 `node .ai-workflow/engine/cli.mjs` 는 플러그인에서는 `node "<플러그인>/engine/cli.mjs"` 다.
 
 ```bash
 node install.mjs <프로젝트 루트>            # 처음 설치
@@ -27,7 +47,7 @@ node install.mjs <프로젝트 루트> --local     # 저장소에 흔적을 남�
 ```
 .ai-workflow/
   engine/          엔진 (설치·업그레이드 때 교체)
-  templates/ko|en/ 기능 문서 템플릿 (프로젝트에서 고쳐 써도 업그레이드가 덮어쓰지 않음)
+  templates/ko|en/ 기능 문서 템플릿 (프로젝트에서 고쳐 써도 업그레이드가 덮어쓰지 않음. 플러그인이면 여기 둔 템플릿이 플러그인 기본값보다 우선)
   features/        기능별 문서(요구사항·설계·작업·테스트·보고서) — 커밋 대상
   checks.json      프로젝트 검사 명령·서버 주소 (사용자 승인으로만 변경) — 커밋 대상
   .env             프로젝트·개인·이 PC 설정 — git 제외

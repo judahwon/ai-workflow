@@ -12,7 +12,7 @@ description: ai-workflow 검수 단계(REVIEW). 모든 작업이 끝난 기능�
 
 1. 검수를 실행한다. 수 분이 걸릴 수 있다.
    ```bash
-   node .ai-workflow/engine/cli.mjs review --feature FEAT-###
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" review --feature FEAT-###
    ```
 2. 결과를 사용자에게 보여준다: 판정, 요구사항별 MET/NOT_MET/UNVERIFIED, 지적(심각도·파일·내용).
    요청 모델(`AIWF_REVIEW_MODEL`)은 기록되지만 실제로 응답한 모델은 확인할 수 없다는 점도 알린다.
@@ -21,12 +21,12 @@ description: ai-workflow 검수 단계(REVIEW). 모든 작업이 끝난 기능�
    - **CHANGES_REQUESTED** → 지적마다 고칠지 사용자와 정한다 (AskUserQuestion, 권장안 먼저).
      - 고친다 → 해당 작업을 다시 연다. 이유에 검수 번호와 지적을 적는다.
        ```bash
-       node .ai-workflow/engine/cli.mjs task-reopen --feature FEAT-### --task TASK-### --reason "R001: <지적 요약>"
+       node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" task-reopen --feature FEAT-### --task TASK-### --reason "R001: <지적 요약>"
        ```
        그다음 `aiwf-develop` 으로 고치고, 모든 작업이 끝나면 다시 `review` 한다.
      - 고칠 필요가 없다(오탐·범위 밖) → 사용자의 답변 **원문 그대로** 넘긴다.
        ```bash
-       node .ai-workflow/engine/cli.mjs review-accept --feature FEAT-### --approval-text "<사용자 답변 원문>" --user-confirmed
+       node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" review-accept --feature FEAT-### --approval-text "<사용자 답변 원문>" --user-confirmed
        ```
      - 요구사항·설계 자체가 틀렸다 → 문서를 고치고 `aiwf-discuss`·`aiwf-design` 에서 다시 승인받는다.
 

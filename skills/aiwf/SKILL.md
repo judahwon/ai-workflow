@@ -8,11 +8,12 @@ description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새
 이 프로젝트는 `.ai-workflow/` 엔진으로 기능을 **논의 → 기획 → 설계 → 개발 → 검수 → 확정 → 문서** 순서로 진행한다.
 진행(대화·문서 작성·구현)은 이 세션이 하고, 엔진은 관문(승인·범위·상태 기록)만 맡는다.
 
-명령은 프로젝트 루트에서 실행한다: `node .ai-workflow/engine/cli.mjs <command>`
+명령은 프로젝트 루트에서 실행한다: `node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" <command>`
+프로젝트 데이터(기능 문서·설정·실행 기록)는 프로젝트의 `.ai-workflow/` 에 있다. 아직 없으면 `aiwf-setup` 이 만든다.
 
 ## 먼저 할 일
 
-1. `node .ai-workflow/engine/cli.mjs status` 를 실행해 설정 상태와 진행 중인 기능을 본다.
+1. `node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" status` 를 실행해 설정 상태와 진행 중인 기능을 본다.
 2. 결과에 따라 해당 스킬로 넘어간다.
 
 | status 결과 | 다음 |
@@ -34,6 +35,8 @@ description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새
   `--approval-text` 에는 사용자 답변을 **고치지 않고 그대로** 넣는다. 사용자가 답하지 않은 질문을 승인으로 간주하지 않는다.
 - `.ai-workflow/engine/`, `runs/`, `state/`, `.env` 를 직접 고치지 않는다. 상태는 엔진 명령으로만 바꾼다.
 - 엔진이 `[CODE]` 로 막으면 우회하지 않는다. 메시지대로 문서를 고치거나 사용자에게 묻는다.
+  - `[ENGINE_OUTDATED]`: 팀의 다른 사람이 더 새 버전으로 이 프로젝트를 다뤘다. 사용자에게 `/plugin` 에서 ai-workflow 를 업데이트하고 Claude Code 를 다시 열라고 알린다.
+  - `[PROJECT_ENGINE_PRESENT]`: 이 프로젝트에는 엔진이 직접 설치돼 있다. 메시지의 `node .ai-workflow/engine/cli.mjs` 로 실행할지, `.ai-workflow/engine/` 을 지우고 플러그인으로 옮길지 사용자에게 묻는다.
 - 종료 코드: 0 성공, 1 오류, 2 사용법, 3 차단, 4 잠금. 잠금(4)은 다른 명령이 도는 중이다. 오래된 잠금이면 사용자에게 알린다.
 - 토큰·비밀번호를 문서·`.env`·명령 인자에 넣지 않는다.
 - Slack 알림이 켜져 있으면 엔진이 단계 전환마다 자동으로 보낸다. 출력의 "Slack 알림: 실패" 는 사용자에게 알리고 `notify` 로 다시 보낸다.

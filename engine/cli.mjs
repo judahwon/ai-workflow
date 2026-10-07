@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// ai-workflow CLI. 사용: node .ai-workflow/engine/cli.mjs <command> [options]  (프로젝트 루트에서)
+// ai-workflow CLI. 사용: node <엔진 폴더>/cli.mjs <command> [options]  (프로젝트 루트에서)
+//   엔진 폴더: 프로젝트 설치면 .ai-workflow/engine, 플러그인이면 <플러그인>/engine
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { WorkflowError, usageError } from './util.mjs';
@@ -19,7 +20,7 @@ const LIST = 'list';
 
 export const COMMANDS = {
   help: { options: {}, run: async () => ({ ok: true, message: HELP }) },
-  init: { options: { set: LIST, 'non-interactive': B, all: B }, run: cmdInit },
+  init: { options: { set: LIST, 'non-interactive': B, all: B, local: B }, run: cmdInit },
   questions: { options: {}, run: cmdQuestions },
   status: { options: { run: S, feature: S, all: B, json: B }, run: cmdStatus },
   new: { options: { title: S, feature: S }, run: cmdNew },
@@ -40,12 +41,14 @@ export const COMMANDS = {
   unlock: { options: { stale: B, reason: S, 'force-unverified': B }, run: cmdUnlock },
 };
 
-export const HELP = `사용: node .ai-workflow/engine/cli.mjs <command> [options]   (프로젝트 루트에서 실행)
+export const HELP = `사용: node <엔진 폴더>/cli.mjs <command> [options]   (프로젝트 루트에서 실행)
+  엔진 폴더: 프로젝트 설치면 .ai-workflow/engine, 플러그인이면 <플러그인>/engine
 
 설정
-  init [--set KEY=VALUE ...] [--non-interactive] [--all]
+  init [--set KEY=VALUE ...] [--non-interactive] [--all] [--local]
       .ai-workflow/.env 를 질의로 채운다. 터미널이면 직접 묻고, 아니면 --set 으로 받는다.
       처음에는 모든 항목을, 이후에는 빠지거나 잘못된 항목만 묻는다 (--all 이면 전부).
+      플러그인이면 .ai-workflow/ 도 여기서 만든다. --local 은 .ai-workflow/ 를 이 PC 의 .git/info/exclude 에만 넣는다.
   questions                 채울 항목과 질문 목록 (JSON, 값은 출력하지 않음)
 
 기능 진행

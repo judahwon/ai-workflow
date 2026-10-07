@@ -1,0 +1,16 @@
+{
+  "name": "ai-workflow",
+  "owner": {
+    "name": "주다훤"
+  },
+  "metadata": {
+    "description": "ai-workflow 플러그인 배포용 마켓플레이스"
+  },
+  "plugins": [
+    {
+      "name": "ai-workflow",
+      "source": "./",
+      "description": "기능을 논의·기획·설계·개발·검수·확정·문서 순서로 진행하는 워크플로"
+    }
+  ]
+}

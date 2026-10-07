@@ -2,6 +2,7 @@
 // 대화형(TTY)이면 readline 으로 묻고, 아니면 --set KEY=VALUE 로 받는다 (Claude Code 는 사용자에게 물은 뒤 --set 으로 넘긴다).
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import readline from 'node:readline/promises';
 import { WorkflowError, atomicWriteFile, usageError } from './util.mjs';
 import { serializeEnv, writeEnvFile } from './envfile.mjs';
@@ -10,18 +11,19 @@ import {
   envPath, checkEnvIgnored, isRequired,
 } from './config.mjs';
 import { withLock } from './lock.mjs';
+import { stampProjectVersion } from './version.mjs';
 
 export const GITIGNORE_LINES = ['.env', '.env.*', '!.env.example', 'runs/', 'state/'];
 
 const ENV_HEADER = [
   'ai-workflow 설정. 프로젝트 정보·개인 정보·이 PC 경로를 모두 여기에 둔다.',
   '이 파일은 git 에서 제외된다(.ai-workflow/.gitignore). 토큰·비밀번호 값은 넣지 않는다.',
-  '`node .ai-workflow/engine/cli.mjs init` 으로 다시 질의하거나 직접 고친다.',
+  'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)으로 다시 질의하거나 직접 고친다.',
 ];
 
 const EXAMPLE_HEADER = [
   'ai-workflow 설정 예시 (키 이름과 설명만). 실제 값은 같은 폴더의 .env 에 둔다.',
-  '`node .ai-workflow/engine/cli.mjs init` 이 질의로 .env 를 만든다.',
+  'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)이 질의로 .env 를 만든다.',
 ];
 
 // .gitignore 에 필요한 줄이 없으면 덧붙인다. 기존 줄은 지우지 않는다.
@@ -56,6 +58,24 @@ export function parseSetOptions(list) {
     result[name] = value;
   }
   return result;
+}
+
+// 로컬 전용: 프로젝트 .gitignore 는 건드리지 않고 이 PC 의 .git/info/exclude 에만 넣어 저장소에 흔적을 남기지 않는다.
+// 프로젝트가 저장소의 하위 폴더여도 저장소의 exclude 에 그 폴더 기준 경로로 넣는다.
+// 반환: 새로 넣은 줄 목록, git 저장소가 아니면 null.
+export function addLocalExcludes(root, patterns) {
+  const git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+  const excludePath = git(['rev-parse', '--git-path', 'info/exclude']);
+  const prefix = git(['rev-parse', '--show-prefix']);
+  if (excludePath.status !== 0 || prefix.status !== 0) return null;
+  const file = path.resolve(root, excludePath.stdout.trim());
+  const base = `/${prefix.stdout.trim()}`.replace(/\/$/, '');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const lines = new Set(current.split(/\r?\n/).map((l) => l.trim()));
+  const added = patterns.map((p) => `${base}${p}`).filter((p) => !lines.has(p));
+  if (added.length) fs.appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}# ai-workflow (로컬 전용)\n${added.join('\n')}\n`);
+  return added;
 }
 
 async function defaultPrompt(questions) {
@@ -99,6 +119,9 @@ export async function cmdInit(ctx, opts) {
     fs.mkdirSync(path.join(ctx.workflowRoot, 'features'), { recursive: true });
     const addedIgnore = ensureGitignore(ctx.workflowRoot);
     writeEnvExample(ctx.workflowRoot);
+    stampProjectVersion(ctx.workflowRoot);
+    // 플러그인이면 프로젝트에 생기는 것은 .ai-workflow/ 뿐이다.
+    const localExcludes = opts.local ? addLocalExcludes(ctx.projectRoot, ['/.ai-workflow/']) : undefined;
 
     const before = ctx.reloadConfig();
     const values = { ...before.raw };
@@ -129,6 +152,8 @@ export async function cmdInit(ctx, opts) {
     const ignore = checkEnvIgnored(ctx);
     const lines = [];
     if (addedIgnore.length) lines.push(`.ai-workflow/.gitignore 에 추가: ${addedIgnore.join(', ')}`);
+    if (localExcludes === null) lines.push('[주의] git 저장소가 아니라 로컬 git 제외를 넣지 못했다');
+    else if (localExcludes) lines.push(`로컬 git 제외(.git/info/exclude): ${localExcludes.length ? localExcludes.join(' ') : '이미 있음'}`);
     lines.push(`설정 파일: ${path.relative(ctx.projectRoot, after.file).split(path.sep).join('/')}`);
     lines.push(`git 제외 상태: ${describeIgnore(ignore.state)}`);
     if (after.errors.length) {

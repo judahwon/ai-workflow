@@ -18,7 +18,7 @@ description: ai-workflow 문서 단계(DOCS). 확정된 기능을 프로젝트 �
 3. 어떤 문서를 쓰거나 고칠지 사용자에게 짧게 알리고 작성한다. 사용자가 원하면 초안을 먼저 보여준다.
 4. 끝낸다.
    ```bash
-   node .ai-workflow/engine/cli.mjs docs-done --feature FEAT-### --summary "<쓴·고친 문서와 내용>"
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" docs-done --feature FEAT-### --summary "<쓴·고친 문서와 내용>"
    ```
    - `DOCS_EMPTY`: 문서가 없다. 문서가 필요 없다고 사용자가 말한 경우에만 그 답변 원문으로 넘긴다.
      `--no-docs-approved "<사용자 답변 원문>" --user-confirmed`

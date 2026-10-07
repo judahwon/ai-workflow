@@ -21,7 +21,7 @@ description: ai-workflow 설계 단계(DESIGN). 기획 승인된 요구사항으
 
 ## 3. tasks.json — 작업 계약
 
-형식은 `.ai-workflow/templates/tasks.example.json` 을 따른다.
+형식은 `${CLAUDE_PLUGIN_ROOT}/templates/tasks.example.json` 을 따른다.
 
 | 필드 | 규칙 |
 |---|---|
@@ -40,7 +40,7 @@ description: ai-workflow 설계 단계(DESIGN). 기획 승인된 요구사항으
 
 ## 4. tests.json — 기능 테스트
 
-요구사항이 충족됐는지 확정 단계에서 확인할 테스트다. 형식은 `.ai-workflow/templates/tests.example.json`.
+요구사항이 충족됐는지 확정 단계에서 확인할 테스트다. 형식은 `${CLAUDE_PLUGIN_ROOT}/templates/tests.example.json`.
 **모든 REQ 에 필수(`required` 기본 true) 테스트가 1개 이상** 있어야 승인된다.
 
 | kind | 내용 |
@@ -60,7 +60,7 @@ description: ai-workflow 설계 단계(DESIGN). 기획 승인된 요구사항으
 1. 설계 요약, 작업 표(ID, 제목, REQ, 수정 허용 범위, 순서), 테스트 표(ID, 종류, REQ)를 사용자에게 보여주고 진행해도 되는지 묻는다.
 2. 사용자가 진행을 명시적으로 말하면 답변 **원문 그대로** 승인한다.
    ```bash
-   node .ai-workflow/engine/cli.mjs approve --feature FEAT-### --phase design --approval-text "<사용자 답변 원문>" --user-confirmed
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" approve --feature FEAT-### --phase design --approval-text "<사용자 답변 원문>" --user-confirmed
    ```
 3. `TASK_INVALID`, `REQUIREMENTS_UNCOVERED`, `TESTS_INVALID`, `REQUIREMENTS_UNTESTED` 등으로 막히면 고치고 바뀐 점을 사용자에게 알린 뒤 다시 확인받는다.
 4. 승인되면 `aiwf-develop` 으로 넘어간다.

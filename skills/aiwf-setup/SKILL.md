@@ -9,7 +9,10 @@ description: ai-workflow 설정(.ai-workflow/.env)을 사용자에게 질의해 
 
 ## 순서
 
-1. `node .ai-workflow/engine/cli.mjs questions` 로 항목 목록(JSON)을 받는다. 값은 출력되지 않는다.
+0. 처음 설정이면(`status` 가 "설정 없음") 이 프로젝트에 `.ai-workflow/` 를 커밋할지 **AskUserQuestion** 으로 묻는다.
+   - 팀과 공유(권장): 기능 문서·checks.json 이 저장소에 남는다.
+   - 이 PC 에만: 4단계 `init` 에 `--local` 을 붙여 `.ai-workflow/` 를 `.git/info/exclude` 에만 넣는다. 저장소에 흔적이 남지 않는다.
+1. `node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" questions` 로 항목 목록(JSON)을 받는다. 값은 출력되지 않는다.
    구간(`section`)마다 `keys` 목록이 있고, 항목마다 `key`, `question`, `description`, `default`, `required`, `filled`, `error` 가 있다.
 2. 물을 항목을 고른다.
    - 처음 설정이면 전부, 아니면 `filled: false` 이거나 `error` 가 있는 항목, 또는 사용자가 바꾸겠다고 한 항목만.
@@ -21,12 +24,12 @@ description: ai-workflow 설정(.ai-workflow/.env)을 사용자에게 질의해 
      (예: `where codex` / `which codex`). 찾은 값도 사용자가 고른 뒤에만 쓴다.
 4. 받은 값을 한 번에 저장한다.
    ```bash
-   node .ai-workflow/engine/cli.mjs init --non-interactive --set KEY=VALUE --set KEY2=VALUE2
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" init --non-interactive --set KEY=VALUE --set KEY2=VALUE2
    ```
    - 값을 지우려면 `KEY=` 로 보낸다. 기본값을 쓰기로 했으면 그 키는 보내지 않아도 된다.
    - 셸 인용에 주의한다. 값에 공백·따옴표가 있으면 따옴표로 감싼다.
 5. 출력의 빠진 항목·형식 오류·git 제외 상태를 확인한다. 남은 문제가 있으면 그 항목만 다시 묻는다.
-6. 설치 출력에 린터 주의가 있었으면 엔진 파일을 린트에서 빼야 한다. 넣지 않으면 lint 검사(checks)가 엔진 때문에 실패한다.
+6. (install.mjs 로 엔진을 프로젝트에 설치한 경우만) 설치 출력에 린터 주의가 있었으면 엔진 파일을 린트에서 빼야 한다. 넣지 않으면 lint 검사(checks)가 엔진 때문에 실패한다. 플러그인이면 프로젝트에 엔진 파일이 없으므로 건너뛴다.
    - `--local` 설치(저장소에 흔적을 남기지 않음)면 린터 설정은 두고 checks.json 의 린트 명령에서 제외한다.
    - 아니면 프로젝트 린터 설정의 제외 목록에 `.ai-workflow/` 를 넣자고 사용자에게 제안한다.
 7. git 제외 상태가 "추적됨"이면 `git rm --cached .ai-workflow/.env` 가 필요하다고 사용자에게 알린다 (직접 커밋하지 않는다).

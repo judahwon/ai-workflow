@@ -9,10 +9,10 @@ description: ai-workflow 개발 단계(DEVELOP). 설계 승인된 작업(TASK-##
 
 ## 작업 하나의 흐름
 
-1. `node .ai-workflow/engine/cli.mjs status --feature FEAT-###` 로 작업 순서와 상태를 본다. 대기(PENDING) 중 의존이 끝난 첫 작업을 고른다.
+1. `node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" status --feature FEAT-###` 로 작업 순서와 상태를 본다. 대기(PENDING) 중 의존이 끝난 첫 작업을 고른다.
 2. 시작한다.
    ```bash
-   node .ai-workflow/engine/cli.mjs task-start --feature FEAT-### --task TASK-###
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" task-start --feature FEAT-### --task TASK-###
    ```
    출력의 목표·수정 허용 범위·완료 조건·멈출 조건을 사용자에게 짧게 알린다.
 3. 구현한다.
@@ -24,7 +24,7 @@ description: ai-workflow 개발 단계(DEVELOP). 설계 승인된 작업(TASK-##
    실패를 성공으로 보고하지 않는다.
 5. 끝낸다.
    ```bash
-   node .ai-workflow/engine/cli.mjs task-done --feature FEAT-### --task TASK-### --summary "<무엇을 바꿨고 완료 조건을 어떻게 확인했는지>"
+   node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" task-done --feature FEAT-### --task TASK-### --summary "<무엇을 바꿨고 완료 조건을 어떻게 확인했는지>"
    ```
 6. 다음 작업으로 간다. 모든 작업이 끝나면 엔진이 검수 단계로 옮긴다. 사용자에게 결과를 요약해 알리고 `aiwf-review` 로 간다.
    작업 중에 `verify --feature FEAT-### --only TEST-###` 로 테스트를 미리 돌려 봐도 된다 (확정에는 확정 단계의 전체 검증이 필요하다).
@@ -37,7 +37,7 @@ description: ai-workflow 개발 단계(DEVELOP). 설계 승인된 작업(TASK-##
   - 이번 한 번만 허락 → 사용자가 허락하면 `task-pause` 로 제한을 풀고 고친 뒤 `task-start` 로 재개한다.
     `task-done` 이 범위 밖 파일로 막히면(`OUT_OF_SCOPE`) 파일 목록을 보여주고, 사용자가 허락한 답변 **원문 그대로** 붙인다.
     ```bash
-    node .ai-workflow/engine/cli.mjs task-done --feature FEAT-### --task TASK-### --summary "..." --extra-approved "<사용자 답변 원문>" --user-confirmed
+    node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" task-done --feature FEAT-### --task TASK-### --summary "..." --extra-approved "<사용자 답변 원문>" --user-confirmed
     ```
 - 사용자 작업이 섞여 범위 밖 파일이 잡혔다면(사용자가 직접 고친 파일 등) 그 사실을 알리고 같은 방식으로 허락받는다. 사용자의 파일을 임의로 되돌리지 않는다.
 

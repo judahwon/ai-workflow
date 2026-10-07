@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // 프로젝트에 ai-workflow 를 설치한다: <프로젝트>/.ai-workflow/{engine,templates} 복사, .gitignore·.env.example 생성.
 // Claude Code 단계별 스킬(.claude/skills/aiwf*)과 파일 수정 범위 훅(.claude/settings.json)도 등록한다.
-// 사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude]
+// Claude Code 플러그인으로 쓰면 이 설치는 필요 없다 (README 의 "플러그인으로 쓰기").
+// 사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude] [--local]
 //   --upgrade   : 이미 설치된 프로젝트의 엔진·스킬만 교체한다. features/·runs/·.env·직접 고친 템플릿은 건드리지 않는다.
 //   --no-claude : .claude/ 아래(스킬·훅)는 건드리지 않는다.
+//   --local     : 저장소에 흔적을 남기지 않는다 (.git/info/exclude 에 제외 추가).
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ensureGitignore, writeEnvExample } from './engine/init.mjs';
+import { ensureGitignore, writeEnvExample, addLocalExcludes } from './engine/init.mjs';
+import { ENGINE_VERSION } from './engine/version.mjs';
 
 const FRAMEWORK_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = '.ai-workflow';
@@ -36,6 +38,12 @@ function copyDir(from, to, { overwrite }) {
   return copied;
 }
 
+// 스킬 원본은 플러그인 경로(${CLAUDE_PLUGIN_ROOT})로 엔진을 부른다. 프로젝트 설치에서는 .ai-workflow/ 경로로 바꾼다.
+export function toProjectSkill(text) {
+  return text.replaceAll('node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs"', 'node .ai-workflow/engine/cli.mjs')
+    .replaceAll('${CLAUDE_PLUGIN_ROOT}/templates/', '.ai-workflow/templates/');
+}
+
 // 프레임워크의 스킬을 .claude/skills/ 에 덮어쓴다. 프레임워크에서 사라진 aiwf* 스킬은 지운다.
 function installSkills(root) {
   const source = path.join(FRAMEWORK_ROOT, 'skills');
@@ -50,7 +58,9 @@ function installSkills(root) {
   }
   for (const name of names) {
     fs.rmSync(path.join(target, name), { recursive: true, force: true });
-    copyDir(path.join(source, name), path.join(target, name), { overwrite: true });
+    for (const file of copyDir(path.join(source, name), path.join(target, name), { overwrite: true })) {
+      if (file.endsWith('.md')) fs.writeFileSync(file, toProjectSkill(fs.readFileSync(file, 'utf8')));
+    }
   }
   return names;
 }
@@ -97,23 +107,6 @@ export function lintersNeedingIgnore(root) {
 
 const LOCAL_EXCLUDES = ['/.ai-workflow/', '/.claude/settings.json', '/.claude/skills/aiwf*/'];
 
-// --local: 프로젝트 .gitignore 는 건드리지 않고 이 PC 의 .git/info/exclude 에만 넣어 저장소에 흔적을 남기지 않는다.
-// 프로젝트가 저장소의 하위 폴더여도 저장소의 exclude 에 그 폴더 기준 경로로 넣는다.
-export function addLocalExcludes(root) {
-  const git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
-  const excludePath = git(['rev-parse', '--git-path', 'info/exclude']);
-  const prefix = git(['rev-parse', '--show-prefix']);
-  if (excludePath.status !== 0 || prefix.status !== 0) return null;
-  const file = path.resolve(root, excludePath.stdout.trim());
-  const base = `/${prefix.stdout.trim()}`.replace(/\/$/, '');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const lines = new Set(current.split(/\r?\n/).map((l) => l.trim()));
-  const added = LOCAL_EXCLUDES.map((p) => `${base}${p}`).filter((p) => !lines.has(p));
-  if (added.length) fs.appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}# ai-workflow (로컬 전용)\n${added.join('\n')}\n`);
-  return added;
-}
-
 export function install(projectRoot, { upgrade = false, claude = true, local = false } = {}) {
   const root = path.resolve(projectRoot);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`프로젝트 폴더가 없다: ${root}`);
@@ -129,14 +122,13 @@ export function install(projectRoot, { upgrade = false, claude = true, local = f
   // 템플릿은 프로젝트에서 고쳐 쓸 수 있으므로 기존 파일을 덮어쓰지 않는다.
   const templates = copyDir(path.join(FRAMEWORK_ROOT, 'templates'), path.join(workflowRoot, 'templates'), { overwrite: false });
   fs.mkdirSync(path.join(workflowRoot, 'features'), { recursive: true });
-  const pkg = JSON.parse(fs.readFileSync(path.join(FRAMEWORK_ROOT, 'package.json'), 'utf8'));
-  fs.writeFileSync(path.join(workflowRoot, 'VERSION'), `${pkg.version}\n`);
+  fs.writeFileSync(path.join(workflowRoot, 'VERSION'), `${ENGINE_VERSION}\n`);
   const ignoreAdded = ensureGitignore(workflowRoot);
   writeEnvExample(workflowRoot);
   const skills = claude ? installSkills(root) : [];
   const hook = claude ? registerHook(root) : 'disabled';
-  const localExcludes = local ? addLocalExcludes(root) : null;
-  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook, linters: lintersNeedingIgnore(root), local, localExcludes };
+  const localExcludes = local ? addLocalExcludes(root, LOCAL_EXCLUDES) : null;
+  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: ENGINE_VERSION, skills, hook, linters: lintersNeedingIgnore(root), local, localExcludes };
 }
 
 const HOOK_MESSAGES = {

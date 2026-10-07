@@ -13,6 +13,8 @@ import { featureDir, readRequirements, readDesign, hashIfExists } from './docume
 import { validateTaskList } from './tasks.mjs';
 import { validateTests, loadChecks } from './testplan.mjs';
 import { describeIgnore } from './init.mjs';
+import { templateDir } from './context.mjs';
+import { ENGINE_VERSION, stampProjectVersion } from './version.mjs';
 
 export const PHASES = ['DISCUSS', 'DESIGN', 'DEVELOP', 'REVIEW', 'VERIFY', 'DOCS', 'DONE'];
 
@@ -180,8 +182,8 @@ export async function cmdNew(ctx, opts) {
     if (existing) throw new WorkflowError('RUN_EXISTS', `${featureId} 는 이미 진행 중이다 (${existing.runId}, ${existing.phase}).`);
     const runId = nextRunId(ctx);
     const fdir = featureDir(ctx, featureId);
-    const templateDir = path.join(ctx.workflowRoot, 'templates', values.AIWF_DOC_LANGUAGE);
-    if (!fs.existsSync(templateDir)) throw blocked('TEMPLATES_MISSING', `템플릿 폴더 없음: templates/${values.AIWF_DOC_LANGUAGE}`);
+    const templates = templateDir(ctx, values.AIWF_DOC_LANGUAGE);
+    if (!fs.existsSync(templates)) throw blocked('TEMPLATES_MISSING', `템플릿 폴더 없음: templates/${values.AIWF_DOC_LANGUAGE}`);
     const vars = {
       FEATURE_ID: featureId,
       RUN_ID: runId,
@@ -196,7 +198,7 @@ export async function cmdNew(ctx, opts) {
         if (fs.lstatSync(target).isSymbolicLink()) throw blocked('SYMLINK_REJECTED', `symlink 거부: features/${featureId}/${name}`);
         continue;
       }
-      atomicWriteFile(target, renderTemplate(fs.readFileSync(path.join(templateDir, name), 'utf8'), vars));
+      atomicWriteFile(target, renderTemplate(fs.readFileSync(path.join(templates, name), 'utf8'), vars));
       created.push(name);
     }
     const run = {
@@ -211,6 +213,7 @@ export async function cmdNew(ctx, opts) {
       approvalHistory: [],
       tasks: {},
     };
+    stampProjectVersion(ctx.workflowRoot);
     saveRun(ctx, run);
     appendEvent(ctx, run, {
       type: 'RUN_CREATED',
@@ -342,6 +345,7 @@ export async function cmdStatus(ctx, opts) {
   const ignore = checkEnvIgnored(ctx);
   const lines = [];
   lines.push(`프로젝트: ${config.values.AIWF_PROJECT_NAME || '(미설정)'}  루트: ${ctx.projectRoot}`);
+  lines.push(`엔진: v${ENGINE_VERSION} (${ctx.mode === 'plugin' ? '플러그인' : '프로젝트 설치'})`);
   lines.push(`설정(.ai-workflow/.env): ${!config.exists ? '없음 — init 필요' : config.errors.length ? `오류 ${config.errors.length}건 — init 필요` : '정상'}`);
   for (const e of config.errors) lines.push(`  - ${e.key}: ${e.message}`);
   lines.push(`git 제외: ${describeIgnore(ignore.state)}`);
