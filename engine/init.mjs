@@ -7,7 +7,7 @@ import { WorkflowError, atomicWriteFile, usageError } from './util.mjs';
 import { serializeEnv, writeEnvFile } from './envfile.mjs';
 import {
   CONFIG_SECTIONS, CONFIG_KEYS, ENV_EXAMPLE_FILE, configKey, validateConfig, looksLikeSecret,
-  envPath, checkEnvIgnored,
+  envPath, checkEnvIgnored, isRequired,
 } from './config.mjs';
 import { withLock } from './lock.mjs';
 
@@ -160,7 +160,9 @@ export async function cmdQuestions(ctx) {
     keys: section.keys.map((k) => ({
       key: k.name,
       question: k.question,
+      description: k.description ?? null,
       default: k.default ?? null,
+      required: isRequired(k, config.values),
       filled: Boolean(config.raw[k.name]),
       error: config.errors.find((e) => e.key === k.name)?.message ?? null,
     })),

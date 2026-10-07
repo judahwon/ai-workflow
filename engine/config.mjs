@@ -178,7 +178,7 @@ export function looksLikeSecret(value) {
   return SECRET_VALUE_PATTERNS.some((re) => re.test(value));
 }
 
-function isRequired(key, values) {
+export function isRequired(key, values) {
   return typeof key.required === 'function' ? key.required(values) : key.required === true;
 }
 
