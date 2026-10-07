@@ -33,7 +33,7 @@ description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새
 
 - **승인은 사용자만 한다.** `approve`, `checks-set`, `review-accept`, `test-confirm`, `confirm`, `--extra-approved`, `--no-docs-approved` 는 사용자가 이 대화에서 진행을 명시적으로 말한 뒤에만 실행하고,
   `--approval-text` 에는 사용자 답변을 **고치지 않고 그대로** 넣는다. 사용자가 답하지 않은 질문을 승인으로 간주하지 않는다.
-- `.ai-workflow/engine/`, `runs/`, `state/`, `.env` 를 직접 고치지 않는다. 상태는 엔진 명령으로만 바꾼다.
+- `.ai-workflow/engine/`, `runs/`, `state/`, `project.env`, `.env`, `~/.ai-workflow/user.env` 를 직접 고치지 않는다. 상태·설정은 엔진 명령으로만 바꾼다.
 - 엔진이 `[CODE]` 로 막으면 우회하지 않는다. 메시지대로 문서를 고치거나 사용자에게 묻는다.
   - `[ENGINE_OUTDATED]`: 팀의 다른 사람이 더 새 버전으로 이 프로젝트를 다뤘다. 사용자에게 `/plugin` 에서 ai-workflow 를 업데이트하고 Claude Code 를 다시 열라고 알린다.
   - `[PROJECT_ENGINE_PRESENT]`: 이 프로젝트에는 엔진이 직접 설치돼 있다. 메시지의 `node .ai-workflow/engine/cli.mjs` 로 실행할지, `.ai-workflow/engine/` 을 지우고 플러그인으로 옮길지 사용자에게 묻는다.

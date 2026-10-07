@@ -1,29 +1,40 @@
 // init: .ai-workflow/.env 를 질의로 채우고 git 제외를 보장한다.
 // 대화형(TTY)이면 readline 으로 묻고, 아니면 --set KEY=VALUE 로 받는다 (Claude Code 는 사용자에게 물은 뒤 --set 으로 넘긴다).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import readline from 'node:readline/promises';
 import { WorkflowError, atomicWriteFile, usageError } from './util.mjs';
-import { serializeEnv, writeEnvFile } from './envfile.mjs';
+import { serializeEnv, writeEnvFile, readEnvFile, quoteValue } from './envfile.mjs';
 import {
   CONFIG_SECTIONS, CONFIG_KEYS, ENV_EXAMPLE_FILE, configKey, validateConfig, looksLikeSecret,
-  envPath, checkEnvIgnored, isRequired,
+  checkEnvIgnored, isRequired,
 } from './config.mjs';
 import { withLock } from './lock.mjs';
 import { stampProjectVersion } from './version.mjs';
 
 export const GITIGNORE_LINES = ['.env', '.env.*', '!.env.example', 'runs/', 'state/'];
 
-const ENV_HEADER = [
-  'ai-workflow 설정. 프로젝트 정보·개인 정보·이 PC 경로를 모두 여기에 둔다.',
-  '이 파일은 git 에서 제외된다(.ai-workflow/.gitignore). 토큰·비밀번호 값은 넣지 않는다.',
+const PROJECT_HEADER = [
+  'ai-workflow 프로젝트 설정. 팀이 같은 값을 쓰도록 커밋한다. 개인 경로·Slack ID·토큰은 넣지 않는다.',
+  'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)으로 바꾼다.',
+];
+
+const USER_HEADER = [
+  'ai-workflow 개인 설정. 이 PC 의 모든 프로젝트에 쓴다. 토큰·비밀번호 값은 넣지 않는다.',
   'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)으로 다시 질의하거나 직접 고친다.',
 ];
 
+const LOCAL_HEADER = [
+  'ai-workflow 개인 설정 중 이 프로젝트에서만 다르게 쓸 값. git 에서 제외된다(.ai-workflow/.gitignore).',
+  'init --override --set KEY=VALUE 로 넣는다. 나머지 개인 값은 개인 설정 파일(~/.ai-workflow/user.env)에 있다.',
+];
+
 const EXAMPLE_HEADER = [
-  'ai-workflow 설정 예시 (키 이름과 설명만). 실제 값은 같은 폴더의 .env 에 둔다.',
-  'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)이 질의로 .env 를 만든다.',
+  'ai-workflow 설정 키 목록 (이름과 설명만).',
+  '프로젝트·검수 항목은 project.env(커밋), 이 PC·알림 항목은 ~/.ai-workflow/user.env, 이 프로젝트에서만 다른 개인 값은 .env 에 둔다.',
+  'ai-workflow 의 init 명령(Claude Code 에서는 aiwf-setup 스킬)이 질의로 채운다.',
 ];
 
 // .gitignore 에 필요한 줄이 없으면 덧붙인다. 기존 줄은 지우지 않는다.
@@ -114,6 +125,49 @@ async function askInteractively(ctx, values, keys) {
   });
 }
 
+// 파일마다 쓸 내용. 기본값도 적어 무엇이 쓰이는지 보이게 한다. 알 수 없는 키는 버리지 않고 남겨 사용자가 확인하게 한다.
+function serializeScope(scope, stored, header) {
+  const sections = CONFIG_SECTIONS.filter((s) => s.scope === scope);
+  const known = Object.fromEntries(sections.flatMap((s) => s.keys).map((k) => [k.name, stored[k.name] || k.default || '']));
+  const unknownKeys = Object.keys(stored).filter((name) => !configKey(name));
+  let content = serializeEnv(sections, known, { header });
+  if (unknownKeys.length) {
+    content += `\n# ===== 알 수 없는 키 (확인 후 지운다) =====\n${unknownKeys.map((k) => `${k}=${quoteValue(stored[k])}`).join('\n')}\n`;
+  }
+  return content;
+}
+
+// 예전 형식(.env 하나에 모든 값)을 나눈다: 프로젝트 값 → project.env, 개인 값 → 개인 설정.
+// 개인 설정에 이미 다른 값이 있으면 .env 에 이 프로젝트 전용 덮어쓰기로 남긴다.
+function migrate(stores) {
+  const moved = [];
+  for (const [name, value] of Object.entries(stores.local)) {
+    const key = configKey(name);
+    if (!key) continue;
+    if (key.scope === 'project') {
+      if (!stores.project[name]) stores.project[name] = value;
+      delete stores.local[name];
+      if (value) moved.push(`${name} → project.env`);
+    } else if (!stores.user[name] || stores.user[name] === value) {
+      if (!stores.user[name] && value) moved.push(`${name} → 개인 설정`);
+      if (value) stores.user[name] = value;
+      delete stores.local[name];
+    }
+  }
+  for (const [name, value] of Object.entries(stores.project)) {
+    if (configKey(name)?.scope !== 'user') continue;
+    if (!stores.user[name] && value) stores.user[name] = value;
+    delete stores.project[name];
+    moved.push(`${name} → 개인 설정 (project.env 에서 뺌)`);
+  }
+  return moved;
+}
+
+const tilde = (file) => {
+  const home = os.homedir();
+  return file.startsWith(home) ? `~${file.slice(home.length)}`.split(path.sep).join('/') : file;
+};
+
 export async function cmdInit(ctx, opts) {
   return withLock(ctx, 'init', async () => {
     fs.mkdirSync(path.join(ctx.workflowRoot, 'features'), { recursive: true });
@@ -124,29 +178,57 @@ export async function cmdInit(ctx, opts) {
     const localExcludes = opts.local ? addLocalExcludes(ctx.projectRoot, ['/.ai-workflow/']) : undefined;
 
     const before = ctx.reloadConfig();
-    const values = { ...before.raw };
-    Object.assign(values, parseSetOptions(opts.set));
+    const { files } = before;
+    const userExisted = fs.existsSync(files.user);
+    const stores = {
+      project: { ...readEnvFile(files.project).values },
+      user: { ...readEnvFile(files.user).values },
+      local: { ...readEnvFile(files.local).values },
+    };
+    const moved = migrate(stores);
+    // 값의 저장 위치: 프로젝트 항목은 project.env, 개인 항목은 개인 설정 (--override 면 이 프로젝트의 .env).
+    const store = (name, value) => {
+      if (configKey(name).scope === 'project') {
+        stores.project[name] = value;
+      } else if (opts.override) {
+        stores.local[name] = value;
+      } else {
+        stores.user[name] = value;
+        delete stores.local[name];
+      }
+    };
+    for (const [name, value] of Object.entries(parseSetOptions(opts.set))) store(name, value);
 
+    const effective = () => {
+      const merged = {};
+      for (const key of CONFIG_KEYS) {
+        const order = key.scope === 'project' ? [stores.project] : [stores.local, stores.user];
+        merged[key.name] = order.map((s) => s[key.name]).find((v) => v) ?? '';
+      }
+      return merged;
+    };
     const interactive = ctx.stdinIsTTY && !opts['non-interactive'];
     if (interactive) {
-      const pending = opts.all || !before.exists
-        ? CONFIG_KEYS
-        : CONFIG_KEYS.filter((k) => validateConfig(values).errors.some((e) => e.key === k.name));
-      // 처음 실행이면 모든 항목을 순서대로 묻고, 이후에는 빠지거나 잘못된 항목만 묻는다.
+      const values = effective();
+      const invalid = (k) => validateConfig(values).errors.some((e) => e.key === k.name);
+      // 처음이면(프로젝트 설정 또는 개인 설정이 없음) 그 구간을 모두 묻고, 이후에는 빠지거나 잘못된 항목만 묻는다.
+      const fresh = { project: !before.projectExists && !before.needsMigration, user: !userExisted && !moved.length };
+      const pending = CONFIG_KEYS.filter((k) => opts.all || fresh[k.scope] || invalid(k));
       await askInteractively(ctx, values, pending);
       // Slack 을 켰으면 그 뒤에 필요해진 항목을 다시 확인한다.
-      const stillMissing = CONFIG_KEYS.filter((k) => validateConfig(values).errors.some((e) => e.key === k.name));
+      const stillMissing = CONFIG_KEYS.filter(invalid);
       if (stillMissing.length) await askInteractively(ctx, values, stillMissing);
+      for (const key of new Set([...pending, ...stillMissing])) store(key.name, values[key.name]);
     }
 
-    // 기본값도 파일에 적어 무엇이 쓰이는지 보이게 한다. 알 수 없는 키는 버리지 않고 오류로 남겨 사용자가 확인하게 한다.
-    const known = Object.fromEntries(CONFIG_KEYS.map((k) => [k.name, values[k.name] || k.default || '']));
-    const unknownKeys = Object.keys(values).filter((name) => !configKey(name));
-    let content = serializeEnv(CONFIG_SECTIONS, known, { header: ENV_HEADER });
-    if (unknownKeys.length) {
-      content += `\n# ===== 알 수 없는 키 (확인 후 지운다) =====\n${unknownKeys.map((k) => `${k}=${values[k]}`).join('\n')}\n`;
+    writeEnvFile(files.project, serializeScope('project', stores.project, PROJECT_HEADER));
+    writeEnvFile(files.user, serializeScope('user', stores.user, USER_HEADER));
+    const overrides = Object.entries(stores.local).filter(([, v]) => v !== '');
+    if (overrides.length) {
+      writeEnvFile(files.local, `${[...LOCAL_HEADER.map((l) => `# ${l}`), ...overrides.map(([k, v]) => `${k}=${quoteValue(v)}`)].join('\n')}\n`);
+    } else if (fs.existsSync(files.local)) {
+      fs.rmSync(files.local);
     }
-    writeEnvFile(envPath(ctx.workflowRoot), content);
     const after = ctx.reloadConfig();
 
     const ignore = checkEnvIgnored(ctx);
@@ -154,8 +236,11 @@ export async function cmdInit(ctx, opts) {
     if (addedIgnore.length) lines.push(`.ai-workflow/.gitignore 에 추가: ${addedIgnore.join(', ')}`);
     if (localExcludes === null) lines.push('[주의] git 저장소가 아니라 로컬 git 제외를 넣지 못했다');
     else if (localExcludes) lines.push(`로컬 git 제외(.git/info/exclude): ${localExcludes.length ? localExcludes.join(' ') : '이미 있음'}`);
-    lines.push(`설정 파일: ${path.relative(ctx.projectRoot, after.file).split(path.sep).join('/')}`);
-    lines.push(`git 제외 상태: ${describeIgnore(ignore.state)}`);
+    if (moved.length) lines.push(`예전 .env 에서 옮김: ${moved.join(', ')}`);
+    lines.push(`프로젝트 설정(커밋 대상): ${path.relative(ctx.projectRoot, files.project).split(path.sep).join('/')}`);
+    lines.push(`개인 설정(이 PC 공통): ${tilde(files.user)}`);
+    if (overrides.length) lines.push(`이 프로젝트 전용 개인 설정: .ai-workflow/.env (${overrides.map(([k]) => k).join(', ')})`);
+    lines.push(`.env git 제외 상태: ${describeIgnore(ignore.state)}`);
     if (after.errors.length) {
       lines.push('아직 채워야 하는 항목:');
       for (const e of after.errors) lines.push(`  - ${e.key}: ${e.message}`);
@@ -182,6 +267,8 @@ export async function cmdQuestions(ctx) {
   const config = ctx.reloadConfig();
   const items = CONFIG_SECTIONS.map((section) => ({
     section: section.title,
+    // project: 팀 공통(project.env, 커밋). user: 개인(이 PC 의 모든 프로젝트 공통).
+    scope: section.scope,
     keys: section.keys.map((k) => ({
       key: k.name,
       question: k.question,
@@ -189,6 +276,7 @@ export async function cmdQuestions(ctx) {
       default: k.default ?? null,
       required: isRequired(k, config.values),
       filled: Boolean(config.raw[k.name]),
+      source: config.sources[k.name] ?? null,
       error: config.errors.find((e) => e.key === k.name)?.message ?? null,
     })),
   }));

@@ -58,7 +58,7 @@ test('install: 재설치는 막고 --upgrade 는 엔진만 바꾸며 설정·기
   const r = install(p.projectRoot, { upgrade: true });
   assert.ok(r.upgraded);
   assert.ok(!fs.existsSync(path.join(p.workflowRoot, 'engine', 'stale.mjs')));
-  assert.match(fs.readFileSync(path.join(p.workflowRoot, '.env'), 'utf8'), /보존/);
+  assert.match(fs.readFileSync(path.join(p.workflowRoot, 'project.env'), 'utf8'), /보존/);
   assert.equal(fs.readFileSync(path.join(p.workflowRoot, 'features/FEAT-001/requirements.md'), 'utf8'), '내 문서');
   assert.equal(fs.readFileSync(path.join(p.workflowRoot, 'templates/ko/design.md'), 'utf8'), '내가 고친 템플릿');
 });

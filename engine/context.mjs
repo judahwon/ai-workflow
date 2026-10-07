@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkflowError } from './util.mjs';
 import { defaultIsPidAlive } from './lock.mjs';
-import { loadConfig, defaultGit } from './config.mjs';
+import { loadConfig, defaultGit, defaultUserConfigFile } from './config.mjs';
 import { runProcess } from './process.mjs';
 import { requireEngineNotOlder } from './version.mjs';
 
@@ -49,6 +49,7 @@ export function createContext(overrides = {}) {
     : locateWorkflowRoot(engineDir, { cwd, projectRoot: overrides.projectRoot });
   const { mode, workflowRoot, projectRoot } = located;
   requireEngineNotOlder(workflowRoot);
+  const env = overrides.env ?? process.env;
   const ctx = {
     engineDir,
     // 기본 템플릿이 있는 곳. 프로젝트 설치면 .ai-workflow/, 플러그인이면 플러그인 루트.
@@ -57,7 +58,9 @@ export function createContext(overrides = {}) {
     workflowRoot,
     projectRoot,
     cwd,
-    env: overrides.env ?? process.env,
+    env,
+    // 이 PC 의 개인 설정 (모든 프로젝트 공통). 테스트는 임시 파일로 바꾼다.
+    userConfigFile: overrides.userConfigFile ?? defaultUserConfigFile(env),
     pid: overrides.pid ?? process.pid,
     hostname: overrides.hostname ?? os.hostname(),
     platform: overrides.platform ?? process.platform,
@@ -74,7 +77,7 @@ export function createContext(overrides = {}) {
     stdinIsTTY: overrides.stdinIsTTY ?? Boolean(process.stdin.isTTY),
   };
   ctx.reloadConfig = () => {
-    ctx.config = loadConfig(workflowRoot);
+    ctx.config = loadConfig(workflowRoot, { userFile: ctx.userConfigFile });
     return ctx.config;
   };
   ctx.reloadConfig();

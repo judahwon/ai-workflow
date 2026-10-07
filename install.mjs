@@ -158,7 +158,7 @@ function main(argv) {
         : `  [주의] ${r.linters.join(', ')} 설정에 .ai-workflow/ 제외가 없다. 엔진 파일까지 검사하면 프로젝트 검사가 실패하므로 제외 목록에 .ai-workflow/ 를 넣는다`] : []),
       '',
       '다음 단계 (프로젝트 루트에서):',
-      '  node .ai-workflow/engine/cli.mjs init      # 프로젝트·개인 설정 질의 → .ai-workflow/.env',
+      '  node .ai-workflow/engine/cli.mjs init      # 설정 질의 → .ai-workflow/project.env(커밋) + ~/.ai-workflow/user.env(개인)',
       '  node .ai-workflow/engine/cli.mjs status',
       '  또는 프로젝트 루트에서 Claude Code 를 열고 /aiwf 로 시작한다',
       '',

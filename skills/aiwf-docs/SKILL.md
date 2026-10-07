@@ -10,7 +10,7 @@ description: ai-workflow 문서 단계(DOCS). 확정된 기능을 프로젝트 �
 
 ## 순서
 
-1. 문서 폴더를 확인한다: `.ai-workflow/.env` 의 `AIWF_DOCS_DIR` (기본 `docs`). `status` 출력이나 사용자에게 확인한다.
+1. 문서 폴더를 확인한다: `.ai-workflow/project.env` 의 `AIWF_DOCS_DIR` (기본 `docs`). `status` 출력이나 사용자에게 확인한다.
 2. 기존 문서 구조와 규칙(프로젝트 CLAUDE.md·README·문서 컨벤션)을 먼저 읽는다. 새 파일을 만들지, 기존 문서를 고칠지 정한다.
    - 기능 설명(목적·사용법·화면/API 동작), 바뀐 설정·데이터 구조, 운영상 주의점을 담는다.
    - 근거는 `.ai-workflow/features/FEAT-###/` 의 requirements·design·decisions 와 실제 코드다. 확정되지 않은 내용은 쓰지 않는다.

@@ -10,6 +10,9 @@ export function tempDir(prefix = 'aiwf-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
+// 테스트가 실제 개인 설정(~/.ai-workflow/user.env)을 읽거나 쓰지 않게 한다. 프로젝트마다 따로 둔다.
+process.env.AIWF_USER_CONFIG = path.join(tempDir('aiwf-user-'), 'user.env');
+
 export function git(cwd, ...args) {
   const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} 실패: ${r.stderr}`);
@@ -26,6 +29,7 @@ export function setupProject({ gitRepo = true } = {}) {
   const overrides = {
     projectRoot,
     workflowRoot,
+    userConfigFile: path.join(tempDir('aiwf-user-'), 'user.env'),
     stdinIsTTY: false,
     now: () => new Date((clock += 1000)).toISOString(),
     out: (line) => output.push(line),

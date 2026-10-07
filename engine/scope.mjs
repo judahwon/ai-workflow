@@ -47,7 +47,8 @@ export function protectedReason(relPath, { ignoreCase = false } = {}) {
   if (p === '.git' || p.startsWith('.git/')) return 'git 내부 파일';
   if (p.startsWith('.ai-workflow/engine/')) return '워크플로 엔진 (설치·업그레이드로만 바뀐다)';
   if (p.startsWith('.ai-workflow/runs/') || p.startsWith('.ai-workflow/state/')) return '워크플로 실행 상태 (엔진 명령으로만 바뀐다)';
-  if (p === '.ai-workflow/.env') return '워크플로 설정 (init 으로만 바꾼다)';
+  if (p === '.ai-workflow/.env') return '워크플로 개인 설정 (init 으로만 바꾼다)';
+  if (p === '.ai-workflow/project.env') return '워크플로 프로젝트 설정 (init 으로만 바꾼다)';
   if (p === '.ai-workflow/checks.json') return '프로젝트 검사 설정 (사용자 승인과 함께 checks-set 으로만 바꾼다)';
   return null;
 }

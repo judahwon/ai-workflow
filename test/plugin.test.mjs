@@ -17,7 +17,7 @@ function pluginProject() {
   const projectRoot = tempDir();
   git(projectRoot, 'init', '-q');
   const output = [];
-  const overrides = { cwd: projectRoot, stdinIsTTY: false, out: (line) => output.push(line) };
+  const overrides = { cwd: projectRoot, stdinIsTTY: false, userConfigFile: path.join(tempDir('aiwf-user-'), 'user.env'), out: (line) => output.push(line) };
   const run = async (...argv) => {
     output.length = 0;
     const code = await main(argv, overrides);

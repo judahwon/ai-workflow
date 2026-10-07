@@ -245,10 +245,17 @@ function harmlessOutside(ctx, filePath) {
   });
 }
 
+function samePath(ctx, a, b) {
+  return ignoreCase(ctx) ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b);
+}
+
 // 반환: { allow, reason }
 export function decideEdit(ctx, filePath) {
   const options = { ignoreCase: ignoreCase(ctx) };
   const rel = toProjectRelative(ctx.projectRoot, filePath);
+  if (ctx.userConfigFile && samePath(ctx, path.resolve(ctx.projectRoot, filePath), ctx.userConfigFile)) {
+    return { allow: false, reason: `${filePath}: 워크플로 개인 설정 (init 으로만 바꾼다)` };
+  }
   if (rel) {
     const reason = protectedReason(rel, options);
     if (reason) return { allow: false, reason: `${rel}: ${reason}` };

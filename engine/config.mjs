@@ -1,5 +1,9 @@
-// 프로젝트·개인 설정 스키마. 모든 값은 .ai-workflow/.env 한 파일에 두고 git 에서 제외한다.
+// 프로젝트·개인 설정 스키마. 값은 세 파일에 나눠 둔다.
+// - 프로젝트 공통(scope: project): .ai-workflow/project.env — 커밋해서 팀이 같은 값을 쓴다. 프로젝트에서 처음 설정하는 사람이 한 번 채운다.
+// - 개인(scope: user): ~/.ai-workflow/user.env — 이 PC 의 모든 프로젝트에 쓰는 경로·Slack 값. git 밖.
+// - 개인 덮어쓰기: .ai-workflow/.env — 이 프로젝트에서만 개인 값을 바꿀 때. git 제외.
 // 엔진 코드와 템플릿에는 프로젝트 이름·회사 문구·Slack ID·PC 경로를 넣지 않는다. 항상 여기서 읽는다.
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { WorkflowError } from './util.mjs';
@@ -7,6 +11,12 @@ import { readEnvFile } from './envfile.mjs';
 
 export const ENV_FILE = '.env';
 export const ENV_EXAMPLE_FILE = '.env.example';
+export const PROJECT_ENV_FILE = 'project.env';
+
+// 개인 설정 파일. AIWF_USER_CONFIG 로 바꿀 수 있다 (테스트·여러 계정).
+export function defaultUserConfigFile(env = process.env) {
+  return env.AIWF_USER_CONFIG || path.join(os.homedir(), '.ai-workflow', 'user.env');
+}
 
 const SLACK_ON = (values) => values.AIWF_SLACK_ENABLED === 'true';
 
@@ -14,6 +24,7 @@ const SLACK_ON = (values) => values.AIWF_SLACK_ENABLED === 'true';
 export const CONFIG_SECTIONS = [
   {
     title: '프로젝트',
+    scope: 'project',
     keys: [
       {
         name: 'AIWF_PROJECT_NAME',
@@ -59,7 +70,30 @@ export const CONFIG_SECTIONS = [
     ],
   },
   {
+    title: '검수',
+    scope: 'project',
+    keys: [
+      {
+        name: 'AIWF_REVIEW_MODEL',
+        question: '검수에 쓸 Codex 모델 ID는? (예: gpt-6.1-sol)',
+        description: '독립 검수 Codex 모델 ID.',
+        default: 'gpt-6.1-sol',
+        required: true,
+        validate: (v) => (/^[a-z0-9][a-z0-9.-]{1,60}$/.test(v) ? null : '소문자·숫자·점·하이픈 모델 ID'),
+      },
+      {
+        name: 'AIWF_REVIEW_AUTH',
+        question: '검수 Codex 인증 방식은? (chatgpt: ChatGPT 구독 로그인만 허용, any: API 키도 허용)',
+        description: '검수 Codex 인증: chatgpt (ChatGPT 로그인이 아니면 검수를 막고 API 키 환경변수를 넘기지 않는다) | any',
+        default: 'chatgpt',
+        required: true,
+        validate: (v) => (['chatgpt', 'any'].includes(v) ? null : 'chatgpt 또는 any'),
+      },
+    ],
+  },
+  {
     title: '이 PC',
+    scope: 'user',
     keys: [
       {
         name: 'AIWF_CLAUDE_BIN',
@@ -78,22 +112,6 @@ export const CONFIG_SECTIONS = [
         validate: validateExecutable,
       },
       {
-        name: 'AIWF_REVIEW_MODEL',
-        question: '검수에 쓸 Codex 모델 ID는? (예: gpt-6.1-sol)',
-        description: '독립 검수 Codex 모델 ID.',
-        default: 'gpt-6.1-sol',
-        required: true,
-        validate: (v) => (/^[a-z0-9][a-z0-9.-]{1,60}$/.test(v) ? null : '소문자·숫자·점·하이픈 모델 ID'),
-      },
-      {
-        name: 'AIWF_REVIEW_AUTH',
-        question: '검수 Codex 인증 방식은? (chatgpt: ChatGPT 구독 로그인만 허용, any: API 키도 허용)',
-        description: '검수 Codex 인증: chatgpt (ChatGPT 로그인이 아니면 검수를 막고 API 키 환경변수를 넘기지 않는다) | any',
-        default: 'chatgpt',
-        required: true,
-        validate: (v) => (['chatgpt', 'any'].includes(v) ? null : 'chatgpt 또는 any'),
-      },
-      {
         name: 'AIWF_PLAYWRIGHT_MODULE',
         question: '브라우저 테스트용 playwright 모듈 폴더 절대 경로는? (브라우저 테스트를 안 쓰면 비워 둠)',
         description: '브라우저 테스트에 쓸 playwright 모듈 폴더 절대 경로. 비우면 브라우저 테스트를 쓰지 않는다.',
@@ -109,6 +127,7 @@ export const CONFIG_SECTIONS = [
   },
   {
     title: '알림 (Slack, 선택)',
+    scope: 'user',
     keys: [
       {
         name: 'AIWF_SLACK_ENABLED',
@@ -150,6 +169,7 @@ export const CONFIG_SECTIONS = [
   },
 ];
 
+for (const section of CONFIG_SECTIONS) for (const key of section.keys) key.scope = section.scope;
 export const CONFIG_KEYS = CONFIG_SECTIONS.flatMap((s) => s.keys);
 const KEY_BY_NAME = new Map(CONFIG_KEYS.map((k) => [k.name, k]));
 
@@ -225,24 +245,66 @@ export function envPath(workflowRoot) {
   return path.join(workflowRoot, ENV_FILE);
 }
 
-// .env 를 읽어 검증한다. 파일이 없거나 오류가 있어도 던지지 않는다 (status/init 이 보여준다).
-export function loadConfig(workflowRoot) {
-  const file = envPath(workflowRoot);
-  const { exists, values: raw, duplicates } = readEnvFile(file);
+export function configFiles(workflowRoot, userFile = defaultUserConfigFile()) {
+  return { project: path.join(workflowRoot, PROJECT_ENV_FILE), user: userFile, local: envPath(workflowRoot) };
+}
+
+// 키마다 값을 읽을 파일 순서. 프로젝트 값은 project.env 에서만 읽는다 (사람마다 달라지지 않게).
+// 예전 형식(모든 값이 .env 하나)의 프로젝트 값은 init 이 project.env 로 옮길 때까지 읽어 준다(legacy).
+const SOURCES = { project: ['project', 'legacy'], user: ['local', 'user'] };
+const SOURCE_FILE = { project: 'project', legacy: 'local', local: 'local', user: 'user' };
+
+// 세 파일을 읽어 합치고 검증한다. 파일이 없거나 오류가 있어도 던지지 않는다 (status/init 이 보여준다).
+// 반환 sources: 키마다 값을 읽은 곳 (project | user | local | legacy).
+export function loadConfig(workflowRoot, { userFile } = {}) {
+  const files = configFiles(workflowRoot, userFile);
+  const read = { project: readEnvFile(files.project), user: readEnvFile(files.user), local: readEnvFile(files.local) };
+  const raw = {};
+  const sources = {};
+  for (const key of CONFIG_KEYS) {
+    for (const source of SOURCES[key.scope]) {
+      const value = read[SOURCE_FILE[source]].values[key.name];
+      if (value !== undefined && value !== '') {
+        raw[key.name] = value;
+        sources[key.name] = source;
+        break;
+      }
+    }
+  }
+  const unknown = new Set();
+  for (const file of Object.values(read)) for (const name of Object.keys(file.values)) if (!KEY_BY_NAME.has(name)) unknown.add(name);
+  for (const name of unknown) raw[name] = '';
   const { values, errors } = validateConfig(raw);
-  for (const d of duplicates) errors.push({ key: d, code: 'DUPLICATE', message: '같은 키가 여러 번 있다' });
-  return { file, exists, raw, values, errors };
+  for (const [name, file] of Object.entries(read)) {
+    for (const d of file.duplicates) errors.push({ key: d, code: 'DUPLICATE', message: `같은 키가 여러 번 있다 (${name})` });
+  }
+  // 개인 값(경로·Slack ID)이 커밋되는 project.env 에 있으면 init 으로 개인 설정으로 옮긴다.
+  for (const name of Object.keys(read.project.values)) {
+    if (KEY_BY_NAME.get(name)?.scope === 'user') errors.push({ key: name, code: 'MISPLACED', message: '개인 설정이 project.env 에 있다. init 이 개인 설정으로 옮긴다' });
+  }
+  return {
+    file: files.local,
+    files,
+    // 프로젝트 설정이 있으면 설정된 것으로 본다. 개인 값은 모두 기본값이 있어 비어 있어도 된다.
+    exists: read.project.exists || read.local.exists,
+    projectExists: read.project.exists,
+    needsMigration: Object.values(sources).includes('legacy'),
+    raw,
+    values,
+    errors,
+    sources,
+  };
 }
 
 // 실제 작업 명령 전에 호출한다. 설정이 불완전하면 무엇이 빠졌는지와 함께 차단한다.
 export function requireValidConfig(ctx) {
   const config = ctx.config;
   if (!config.exists) {
-    throw new WorkflowError('CONFIG_MISSING', '.ai-workflow/.env 가 없다. 먼저 init 으로 설정을 채운다.', { exitCode: 3 });
+    throw new WorkflowError('CONFIG_MISSING', '프로젝트 설정(.ai-workflow/project.env)이 없다. 먼저 init 으로 설정을 채운다.', { exitCode: 3 });
   }
   if (config.errors.length) {
     const lines = config.errors.map((e) => `${e.key}: ${e.message}`);
-    throw new WorkflowError('CONFIG_INVALID', `.ai-workflow/.env 설정 오류 — init 으로 고친다.\n  ${lines.join('\n  ')}`, {
+    throw new WorkflowError('CONFIG_INVALID', `설정 오류 — init 으로 고친다.\n  ${lines.join('\n  ')}`, {
       exitCode: 3,
       details: { errors: config.errors },
     });

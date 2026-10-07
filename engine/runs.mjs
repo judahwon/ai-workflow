@@ -346,7 +346,8 @@ export async function cmdStatus(ctx, opts) {
   const lines = [];
   lines.push(`프로젝트: ${config.values.AIWF_PROJECT_NAME || '(미설정)'}  루트: ${ctx.projectRoot}`);
   lines.push(`엔진: v${ENGINE_VERSION} (${ctx.mode === 'plugin' ? '플러그인' : '프로젝트 설치'})`);
-  lines.push(`설정(.ai-workflow/.env): ${!config.exists ? '없음 — init 필요' : config.errors.length ? `오류 ${config.errors.length}건 — init 필요` : '정상'}`);
+  lines.push(`설정: ${!config.exists ? '없음 — init 필요' : config.errors.length ? `오류 ${config.errors.length}건 — init 필요` : '정상'}`
+    + `  (프로젝트 .ai-workflow/project.env ${config.projectExists ? '있음' : '없음'}${config.needsMigration ? ' — 예전 .env 형식, init 으로 나눈다' : ''})`);
   for (const e of config.errors) lines.push(`  - ${e.key}: ${e.message}`);
   lines.push(`git 제외: ${describeIgnore(ignore.state)}`);
   lines.push(`Slack 알림: ${config.values.AIWF_SLACK_ENABLED === 'true' ? '사용' : '사용 안 함'}`);

@@ -50,7 +50,8 @@ node install.mjs <프로젝트 루트> --local     # 저장소에 흔적을 남�
   templates/ko|en/ 기능 문서 템플릿 (프로젝트에서 고쳐 써도 업그레이드가 덮어쓰지 않음. 플러그인이면 여기 둔 템플릿이 플러그인 기본값보다 우선)
   features/        기능별 문서(요구사항·설계·작업·테스트·보고서) — 커밋 대상
   checks.json      프로젝트 검사 명령·서버 주소 (사용자 승인으로만 변경) — 커밋 대상
-  .env             프로젝트·개인·이 PC 설정 — git 제외
+  project.env      프로젝트 공통 설정 (이름·문서 폴더·검수 정책) — 커밋 대상
+  .env             이 프로젝트에서만 다른 개인 설정 (있을 때만) — git 제외
   .env.example     설정 키 설명 — 커밋 대상
   .gitignore       .env, runs/, state/ 제외
   runs/  state/    실행 상태·이벤트·잠금 — git 제외
@@ -62,28 +63,41 @@ node install.mjs <프로젝트 루트> --local     # 저장소에 흔적을 남�
 
 Claude Code 는 **프로젝트 루트에서** 연다. 훅과 스킬이 루트의 `.claude/` 에서 로드된다.
 
-## 설정: `.ai-workflow/.env`
+## 설정
 
-프로젝트 이름, 회사 문구, Slack ID, PC 경로를 모두 이 파일 하나에 둔다. 엔진과 템플릿에는 이런 값을 넣지 않는다.
+엔진과 템플릿에는 프로젝트 이름, 회사 문구, Slack ID, PC 경로를 넣지 않는다. 설정은 세 파일에 나뉜다.
+
+| 파일 | 내용 | 공유 | 누가 언제 채우나 |
+|---|---|---|---|
+| `.ai-workflow/project.env` | 프로젝트·검수 항목 | 커밋 (팀 공통) | 이 프로젝트에서 처음 설정하는 사람이 한 번 |
+| `~/.ai-workflow/user.env` | 이 PC·알림 항목 | 이 PC 의 모든 프로젝트 | 각자 PC 에서 한 번 (`AIWF_USER_CONFIG` 로 위치 변경) |
+| `.ai-workflow/.env` | 이 프로젝트에서만 다른 개인 값 | git 제외 | 필요할 때 `init --override` |
+
+팀원은 저장소를 받으면 `project.env` 가 이미 있으므로 개인 항목만 답한다. 개인 항목은 모두 기본값이 있어 그대로 써도 된다.
 
 ```bash
 node .ai-workflow/engine/cli.mjs init                        # 터미널에서 질의
 node .ai-workflow/engine/cli.mjs init --set KEY=VALUE ...    # 비대화형 (Claude Code 가 사용자에게 물은 뒤 사용)
+node .ai-workflow/engine/cli.mjs init --override --set AIWF_CODEX_BIN=...   # 이 프로젝트에서만 다른 개인 값
 node .ai-workflow/engine/cli.mjs questions                   # 채울 항목 목록 (JSON, 값 미출력)
 ```
 
-- 처음에는 모든 항목을, 이후에는 빠지거나 잘못된 항목만 묻는다 (`--all` 이면 전부).
+- 처음에는 그 파일의 모든 항목을, 이후에는 빠지거나 잘못된 항목만 묻는다 (`--all` 이면 전부).
+- 예전처럼 `.env` 하나에 모든 값이 있으면 `init` 이 `project.env` 와 개인 설정으로 나눠 옮긴다. 옮기기 전에도 그대로 읽는다.
+- 프로젝트 항목은 `project.env` 에서만 읽는다 (사람마다 달라지지 않게). 개인 항목이 `project.env` 에 있으면 오류로 알리고 `init` 이 옮긴다.
 - 토큰·비밀번호 형태의 값은 어떤 키에도 저장하지 않는다. Slack 토큰은 암호화된 파일의 **경로**만 둔다.
 - git 저장소에서 `.ai-workflow/.env` 가 추적되거나 제외되지 않으면 작업 명령(`new`, `approve`)을 막는다.
+- 세 파일 모두 훅이 Write·Edit 를 막는다. `init` 으로만 바꾼다.
 
 | 구분 | 키 | 필수 |
 |---|---|---|
-| 프로젝트 | `AIWF_PROJECT_NAME` | ✔ |
+| 프로젝트 (팀 공통) | `AIWF_PROJECT_NAME` | ✔ |
 | | `AIWF_PROJECT_SUMMARY`, `AIWF_ORGANIZATION`, `AIWF_ORGANIZATION_NOTICE` | |
 | | `AIWF_DOC_LANGUAGE` (ko/en, 기본 ko), `AIWF_DOCS_DIR` (기본 docs) | ✔ (기본값) |
-| 이 PC | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN`, `AIWF_REVIEW_MODEL`, `AIWF_REVIEW_AUTH` (chatgpt/any, 기본 chatgpt) | ✔ (기본값) |
+| 검수 (팀 공통) | `AIWF_REVIEW_MODEL`, `AIWF_REVIEW_AUTH` (chatgpt/any, 기본 chatgpt) | ✔ (기본값) |
+| 이 PC (개인) | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN` | ✔ (기본값) |
 | | `AIWF_PLAYWRIGHT_MODULE`, `AIWF_BROWSER_CHANNEL` | |
-| 알림 | `AIWF_SLACK_ENABLED` (기본 false) | ✔ (기본값) |
+| 알림 (개인) | `AIWF_SLACK_ENABLED` (기본 false) | ✔ (기본값) |
 | | `AIWF_SLACK_WORKSPACE`, `AIWF_SLACK_USER_ID`, `AIWF_SLACK_CHANNEL_ID`, `AIWF_SLACK_TOKEN_FILE` | Slack 사용 시 |
 
 ## 기능 진행

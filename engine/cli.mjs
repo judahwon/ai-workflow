@@ -20,7 +20,7 @@ const LIST = 'list';
 
 export const COMMANDS = {
   help: { options: {}, run: async () => ({ ok: true, message: HELP }) },
-  init: { options: { set: LIST, 'non-interactive': B, all: B, local: B }, run: cmdInit },
+  init: { options: { set: LIST, 'non-interactive': B, all: B, local: B, override: B }, run: cmdInit },
   questions: { options: {}, run: cmdQuestions },
   status: { options: { run: S, feature: S, all: B, json: B }, run: cmdStatus },
   new: { options: { title: S, feature: S }, run: cmdNew },
@@ -45,9 +45,12 @@ export const HELP = `사용: node <엔진 폴더>/cli.mjs <command> [options]   
   엔진 폴더: 프로젝트 설치면 .ai-workflow/engine, 플러그인이면 <플러그인>/engine
 
 설정
-  init [--set KEY=VALUE ...] [--non-interactive] [--all] [--local]
-      .ai-workflow/.env 를 질의로 채운다. 터미널이면 직접 묻고, 아니면 --set 으로 받는다.
-      처음에는 모든 항목을, 이후에는 빠지거나 잘못된 항목만 묻는다 (--all 이면 전부).
+  init [--set KEY=VALUE ...] [--non-interactive] [--all] [--local] [--override]
+      설정을 질의로 채운다. 터미널이면 직접 묻고, 아니면 --set 으로 받는다.
+      프로젝트·검수 항목은 .ai-workflow/project.env(커밋), 이 PC·알림 항목은 개인 설정(~/.ai-workflow/user.env)에 쓴다.
+      --override 는 개인 항목을 이 프로젝트의 .ai-workflow/.env 에만 쓴다 (이 프로젝트에서만 다른 값).
+      처음에는 그 구간의 모든 항목을, 이후에는 빠지거나 잘못된 항목만 묻는다 (--all 이면 전부).
+      예전 .env 하나에 모든 값이 있으면 프로젝트 값과 개인 값으로 나눠 옮긴다.
       플러그인이면 .ai-workflow/ 도 여기서 만든다. --local 은 .ai-workflow/ 를 이 PC 의 .git/info/exclude 에만 넣는다.
   questions                 채울 항목과 질문 목록 (JSON, 값은 출력하지 않음)
 
