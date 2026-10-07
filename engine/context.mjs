@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { WorkflowError } from './util.mjs';
 import { defaultIsPidAlive } from './lock.mjs';
 import { loadConfig, defaultGit } from './config.mjs';
+import { runProcess } from './process.mjs';
 
 export const WORKFLOW_DIR_NAME = '.ai-workflow';
 
@@ -33,6 +34,10 @@ export function createContext(overrides = {}) {
     now: overrides.now ?? (() => new Date().toISOString()),
     isPidAlive: overrides.isPidAlive ?? defaultIsPidAlive,
     git: overrides.git ?? defaultGit,
+    // 테스트·검수·알림 실행. 테스트에서 가짜로 바꿔 끼운다.
+    runProcess: overrides.runProcess ?? runProcess,
+    fetchImpl: overrides.fetchImpl ?? globalThis.fetch,
+    playwright: overrides.playwright,
     out: overrides.out ?? ((line) => process.stdout.write(`${line}\n`)),
     // init 질의용. 기본은 TTY 일 때만 readline 으로 묻는다.
     prompt: overrides.prompt,
