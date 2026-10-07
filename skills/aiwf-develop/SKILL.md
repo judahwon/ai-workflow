@@ -26,7 +26,8 @@ description: ai-workflow 개발 단계(DEVELOP). 설계 승인된 작업(TASK-##
    ```bash
    node .ai-workflow/engine/cli.mjs task-done --feature FEAT-### --task TASK-### --summary "<무엇을 바꿨고 완료 조건을 어떻게 확인했는지>"
    ```
-6. 다음 작업으로 간다. 모든 작업이 끝나면 엔진이 검수 단계로 옮긴다. 사용자에게 결과를 요약해 알린다.
+6. 다음 작업으로 간다. 모든 작업이 끝나면 엔진이 검수 단계로 옮긴다. 사용자에게 결과를 요약해 알리고 `aiwf-review` 로 간다.
+   작업 중에 `verify --feature FEAT-### --only TEST-###` 로 테스트를 미리 돌려 봐도 된다 (확정에는 확정 단계의 전체 검증이 필요하다).
 
 ## 범위 밖 수정이 필요할 때
 

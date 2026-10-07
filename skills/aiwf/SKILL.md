@@ -1,6 +1,6 @@
 ---
 name: aiwf
-description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새 기능 개발·기능 논의·"워크플로로 진행"을 요청하거나, 진행 중인 기능(FEAT-###)을 이어 갈 때 쓴다. 현재 단계를 확인하고 단계별 스킬(aiwf-setup, aiwf-discuss, aiwf-design, aiwf-develop)로 넘긴다.
+description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새 기능 개발·기능 논의·"워크플로로 진행"을 요청하거나, 진행 중인 기능(FEAT-###)을 이어 갈 때 쓴다. 현재 단계를 확인하고 단계별 스킬(aiwf-setup, aiwf-discuss, aiwf-design, aiwf-develop, aiwf-review, aiwf-verify, aiwf-docs)로 넘긴다.
 ---
 
 # ai-workflow 시작점
@@ -22,14 +22,18 @@ description: ai-workflow 로 기능을 진행할 때 시작점. 사용자가 새
 | 단계: 논의·기획 | `aiwf-discuss` |
 | 단계: 설계 | `aiwf-design` |
 | 단계: 개발 | `aiwf-develop` |
-| 단계: 검수 이후 | 아직 엔진이 지원하지 않는다 (M4). 사용자에게 현재 상태를 알리고 지시를 받는다 |
+| 단계: 검수 | `aiwf-review` |
+| 단계: 확정 (테스트·완료 판정) | `aiwf-verify` |
+| 단계: 문서 작성 | `aiwf-docs` |
+| 단계: 완료 | 결과(report.md)를 알리고 다음 기능을 묻는다 |
 | `! 승인 이후 변경` 표시 | 바뀐 문서를 사용자에게 보여주고, 해당 단계 스킬에서 다시 승인받는다 |
 
 ## 항상 지키는 것
 
-- **승인은 사용자만 한다.** `approve` 와 `--extra-approved` 는 사용자가 이 대화에서 진행을 명시적으로 말한 뒤에만 실행하고,
+- **승인은 사용자만 한다.** `approve`, `checks-set`, `review-accept`, `test-confirm`, `confirm`, `--extra-approved`, `--no-docs-approved` 는 사용자가 이 대화에서 진행을 명시적으로 말한 뒤에만 실행하고,
   `--approval-text` 에는 사용자 답변을 **고치지 않고 그대로** 넣는다. 사용자가 답하지 않은 질문을 승인으로 간주하지 않는다.
 - `.ai-workflow/engine/`, `runs/`, `state/`, `.env` 를 직접 고치지 않는다. 상태는 엔진 명령으로만 바꾼다.
 - 엔진이 `[CODE]` 로 막으면 우회하지 않는다. 메시지대로 문서를 고치거나 사용자에게 묻는다.
 - 종료 코드: 0 성공, 1 오류, 2 사용법, 3 차단, 4 잠금. 잠금(4)은 다른 명령이 도는 중이다. 오래된 잠금이면 사용자에게 알린다.
 - 토큰·비밀번호를 문서·`.env`·명령 인자에 넣지 않는다.
+- Slack 알림이 켜져 있으면 엔진이 단계 전환마다 자동으로 보낸다. 출력의 "Slack 알림: 실패" 는 사용자에게 알리고 `notify` 로 다시 보낸다.
