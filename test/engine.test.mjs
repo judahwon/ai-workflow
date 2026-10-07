@@ -126,6 +126,21 @@ test('install: .ai-workflow 를 제외하지 않은 린터 설정을 알린다',
   }
 });
 
+test('install --local: .gitignore 대신 .git/info/exclude 에 한 번만 넣는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.git', 'info'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git', 'info', 'exclude'), '# 기존\n/.ai-workflow/');
+    const r = install(dir, { claude: false, local: true });
+    assert.deepEqual(r.localExcludes, ['/.claude/settings.json', '/.claude/skills/aiwf*/']);
+    assert.ok(!fs.existsSync(path.join(dir, '.gitignore')));
+    assert.deepEqual(install(dir, { claude: false, local: true, upgrade: true }).localExcludes, []);
+    assert.equal(fs.readFileSync(path.join(dir, '.git', 'info', 'exclude'), 'utf8'), '# 기존\n/.ai-workflow/\n# ai-workflow (로컬 전용)\n/.claude/settings.json\n/.claude/skills/aiwf*/\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('install --no-claude: .claude 를 만들지 않는다', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
   try {

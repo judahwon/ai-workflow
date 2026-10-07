@@ -12,7 +12,12 @@ Claude Code 와 함께 기능을 **논의 → 기획 → 설계 → 개발 → �
 node install.mjs <프로젝트 루트>            # 처음 설치
 node install.mjs <프로젝트 루트> --upgrade  # 엔진·스킬만 교체 (.env·features·고친 템플릿 보존)
 node install.mjs <프로젝트 루트> --no-claude # .claude/ (스킬·훅)는 건드리지 않음
+node install.mjs <프로젝트 루트> --local     # 저장소에 흔적을 남기지 않음 (.git/info/exclude 에 제외 추가)
 ```
+
+`--local` 은 `.ai-workflow/`·`.claude/settings.json`·`.claude/skills/aiwf*/` 를 이 PC 의 `.git/info/exclude` 에만 넣는다.
+프로젝트 `.gitignore`·린터 설정을 고치지 않으므로, 린트 검사는 checks.json 명령에서 제외한다 (예: `npx eslint . --ignore-pattern ".ai-workflow/**"`).
+`.claude/settings.json` 이 이미 git 이 추적하는 파일이면 훅 등록이 변경으로 보인다.
 
 프로젝트 린터(eslint·prettier·biome)가 `.ai-workflow/` 를 검사하면 엔진 파일 때문에 lint 검사가 실패한다.
 설치가 이를 알리면 린터 제외 목록에 `.ai-workflow/` 를 넣는다.

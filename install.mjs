@@ -94,7 +94,22 @@ export function lintersNeedingIgnore(root) {
     .map(([tool]) => tool);
 }
 
-export function install(projectRoot, { upgrade = false, claude = true } = {}) {
+const LOCAL_EXCLUDES = ['/.ai-workflow/', '/.claude/settings.json', '/.claude/skills/aiwf*/'];
+
+// --local: 프로젝트 .gitignore 는 건드리지 않고 이 PC 의 .git/info/exclude 에만 넣어 저장소에 흔적을 남기지 않는다.
+export function addLocalExcludes(root) {
+  const gitDir = path.join(root, '.git');
+  if (!fs.existsSync(gitDir) || !fs.statSync(gitDir).isDirectory()) return null;
+  const file = path.join(gitDir, 'info', 'exclude');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const lines = new Set(current.split(/\r?\n/).map((l) => l.trim()));
+  const added = LOCAL_EXCLUDES.filter((p) => !lines.has(p));
+  if (added.length) fs.appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}# ai-workflow (로컬 전용)\n${added.join('\n')}\n`);
+  return added;
+}
+
+export function install(projectRoot, { upgrade = false, claude = true, local = false } = {}) {
   const root = path.resolve(projectRoot);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`프로젝트 폴더가 없다: ${root}`);
   if (path.resolve(root) === FRAMEWORK_ROOT) throw new Error('프레임워크 저장소 자신에는 설치하지 않는다.');
@@ -115,7 +130,8 @@ export function install(projectRoot, { upgrade = false, claude = true } = {}) {
   writeEnvExample(workflowRoot);
   const skills = claude ? installSkills(root) : [];
   const hook = claude ? registerHook(root) : 'disabled';
-  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook, linters: lintersNeedingIgnore(root) };
+  const localExcludes = local ? addLocalExcludes(root) : null;
+  return { workflowRoot, upgraded: installed, engineFiles: engine.length, templateFiles: templates.length, ignoreAdded, version: pkg.version, skills, hook, linters: lintersNeedingIgnore(root), local, localExcludes };
 }
 
 const HOOK_MESSAGES = {
@@ -126,20 +142,23 @@ const HOOK_MESSAGES = {
 };
 
 function main(argv) {
-  const flags = ['--upgrade', '--no-claude'];
+  const flags = ['--upgrade', '--no-claude', '--local'];
   const args = argv.filter((a) => !flags.includes(a));
   if (args.length !== 1 || args[0].startsWith('--')) {
-    process.stderr.write('사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude]\n');
+    process.stderr.write('사용: node install.mjs <프로젝트 루트> [--upgrade] [--no-claude] [--local]\n');
     return 2;
   }
   try {
-    const r = install(args[0], { upgrade: argv.includes('--upgrade'), claude: !argv.includes('--no-claude') });
+    const r = install(args[0], { upgrade: argv.includes('--upgrade'), claude: !argv.includes('--no-claude'), local: argv.includes('--local') });
     process.stdout.write([
       `${r.upgraded ? '엔진 교체' : '설치'} 완료 (v${r.version}): ${r.workflowRoot}`,
       `  엔진 파일 ${r.engineFiles}개, 새 템플릿 ${r.templateFiles}개${r.ignoreAdded.length ? `, .gitignore 추가: ${r.ignoreAdded.join(' ')}` : ''}`,
       ...(r.skills.length ? [`  스킬: ${r.skills.map((n) => `.claude/skills/${n}`).join(', ')}`] : []),
       `  ${HOOK_MESSAGES[r.hook]}`,
-      ...(r.linters.length ? [`  [주의] ${r.linters.join(', ')} 설정에 .ai-workflow/ 제외가 없다. 엔진 파일까지 검사하면 프로젝트 검사가 실패하므로 제외 목록에 .ai-workflow/ 를 넣는다`] : []),
+      ...(r.local ? [r.localExcludes === null ? '  [주의] git 저장소가 아니라 로컬 git 제외를 넣지 못했다' : `  로컬 git 제외(.git/info/exclude): ${r.localExcludes.length ? r.localExcludes.join(' ') : '이미 있음'}`] : []),
+      ...(r.linters.length ? [r.local
+        ? `  [주의] ${r.linters.join(', ')} 가 .ai-workflow/ 도 검사한다. 로컬 전용이므로 린터 설정은 두고 checks.json 의 린트 명령에서 제외한다 (예: npx eslint . --ignore-pattern ".ai-workflow/**")`
+        : `  [주의] ${r.linters.join(', ')} 설정에 .ai-workflow/ 제외가 없다. 엔진 파일까지 검사하면 프로젝트 검사가 실패하므로 제외 목록에 .ai-workflow/ 를 넣는다`] : []),
       '',
       '다음 단계 (프로젝트 루트에서):',
       '  node .ai-workflow/engine/cli.mjs init      # 프로젝트·개인 설정 질의 → .ai-workflow/.env',
