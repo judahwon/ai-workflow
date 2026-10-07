@@ -147,6 +147,7 @@ test('task-done: git 으로 범위 밖 변경을 잡고, 사용자 허락으로�
   assert.equal(r.code, 3);
   assert.match(r.out, /OUT_OF_SCOPE/);
   assert.match(r.out, /src\/other\.ts/);
+  assert.match(r.out, /\[확인 필요\] TASK-001 의 수정 범위 밖 파일 1개가 바뀌었습니다[\s\S]*1\. 허락한다[\s\S]*2\. 되돌린다[\s\S]*3\. 범위를 고친다/);
   assert.doesNotMatch(r.out, /engine\/cli\.mjs|aiwf-docs/, '설치기가 바꾸는 파일은 작업의 변경이 아니다');
   assert.doesNotMatch(r.out, /notes\/before\.md/, '시작 전 변경은 이 작업의 변경이 아니다');
   r = await p.run('task-done', ...F, '--task', 'TASK-001', '--summary', '목록 추가', '--extra-approved', '괜찮아');

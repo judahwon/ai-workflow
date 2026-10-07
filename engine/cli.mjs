@@ -13,6 +13,7 @@ import { cmdReview, cmdReviewAccept } from './review.mjs';
 import { cmdDocsDone } from './docs.mjs';
 import { cmdNotify, flushNotifications, describeFlush } from './notify.mjs';
 import { notificationsEnabled } from './events.mjs';
+import { renderDecision } from './decisions.mjs';
 
 const S = 'string';
 const B = 'boolean';
@@ -165,12 +166,14 @@ export async function main(argv, ctxOverrides = {}) {
     ctx = createContext(ctxOverrides);
     const result = await COMMANDS[command].run(ctx, opts);
     if (result?.message) ctx.out(result.message);
+    if (result?.decision) ctx.out(renderDecision(result.decision));
     await autoNotify(ctx, command);
     return result?.ok === false ? 3 : 0;
   } catch (e) {
     const out = ctx?.out ?? ctxOverrides.out ?? ((l) => process.stderr.write(`${l}\n`));
     if (e instanceof WorkflowError) {
       out(`[${e.code}] ${e.message}`);
+      if (e.details?.decision) out(renderDecision(e.details.decision));
       await autoNotify(ctx, command);
       return e.exitCode;
     }

@@ -6,6 +6,7 @@ import { withLock } from './lock.mjs';
 import { appendEvent } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
 import { resolveRun, saveRun, PHASE_LABELS } from './runs.mjs';
+import { outOfScopeDecision, docsEmptyDecision } from './decisions.mjs';
 import { featureDir } from './documents.mjs';
 import { changedSinceBaseline, classifyChanges } from './scope.mjs';
 import { ignoreCase } from './develop.mjs';
@@ -93,11 +94,11 @@ export async function cmdDocsDone(ctx, opts) {
           `확정 이후 문서 폴더(${docsDir}/) 밖 파일이 바뀌었다:`,
           ...outOfScope.map((f) => `  - ${f}`),
           '확정한 코드가 바뀐 것이다. 되돌리거나, 사용자 허락을 받아 --extra-approved "<사용자 답변 원문>" --user-confirmed 로 다시 실행한다.',
-        ].join('\n'));
+        ].join('\n'), { decision: outOfScopeDecision(values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, files: outOfScope, docs: true }) });
       }
       // 루트 README·CLAUDE.md 처럼 문서 폴더 밖 문서만 고친 경우도 사용자가 허락했으면 문서 작업으로 본다.
       if (inScope.length === 0 && outOfScope.length === 0 && !noDocsText) {
-        throw blocked('DOCS_EMPTY', `바뀐 문서가 없다. ${docsDir}/ 아래(또는 사용자 허락을 받아 그 밖)에 문서를 쓰거나, 문서가 필요 없다는 사용자 답변을 --no-docs-approved 로 남긴다.`);
+        throw blocked('DOCS_EMPTY', `바뀐 문서가 없다. ${docsDir}/ 아래(또는 사용자 허락을 받아 그 밖)에 문서를 쓰거나, 문서가 필요 없다는 사용자 답변을 --no-docs-approved 로 남긴다.`, { decision: docsEmptyDecision(values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, docsDir }) });
       }
       docFiles = inScope;
       if (outOfScope.length) run.docs.extraApproved = { files: outOfScope, approvalText: redact(extraText).slice(0, 2000) };
@@ -116,6 +117,7 @@ export async function cmdDocsDone(ctx, opts) {
       type: 'RUN_DONE', status: 'DONE',
       summary: `기능 완료. 문서 ${docFiles.length}개: ${summary.slice(0, 300)}`,
       evidencePaths: [...docFiles, `.ai-workflow/features/${run.featureId}/report.md`],
+      data: { docs: docFiles.length, firstDoc: docFiles[0] ?? null },
     });
     lines.unshift(`${run.featureId} 완료. 문서 ${docFiles.length}개${docFiles.length ? `: ${docFiles.join(', ')}` : ''}`);
     lines.push(`보고서: .ai-workflow/features/${run.featureId}/report.md`);

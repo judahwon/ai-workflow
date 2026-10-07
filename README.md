@@ -98,6 +98,7 @@ node .ai-workflow/engine/cli.mjs questions                   # 채울 항목 목
 | 이 PC (개인) | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN` | ✔ (기본값) |
 | | `AIWF_PLAYWRIGHT_MODULE`, `AIWF_BROWSER_CHANNEL` | |
 | 알림 (개인) | `AIWF_SLACK_ENABLED` (기본 false) | ✔ (기본값) |
+| | `AIWF_SLACK_LEVEL` (all/important, 기본 all) | ✔ (기본값) |
 | | `AIWF_SLACK_WORKSPACE`, `AIWF_SLACK_USER_ID`, `AIWF_SLACK_CHANNEL_ID`, `AIWF_SLACK_TOKEN_FILE` | Slack 사용 시 |
 
 ## 기능 진행
@@ -183,7 +184,16 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 
 - 전송은 Windows PowerShell(`engine/slack-send.ps1`)이 한다. 토큰 파일은 현재 Windows 사용자로 암호화된 파일
   (DPAPI 또는 `ConvertFrom-SecureString` 출력)이어야 하고, 평문 토큰 파일은 거부한다. Node 는 토큰을 읽지 않는다.
-- 사용자 확인이 필요한 이벤트(승인 되돌림, 검수 지적·실패, 검증 실패, 완료)는 `AIWF_SLACK_USER_ID` 를 멘션한다.
+- 메시지는 세 줄이다. 단계 이름은 터미널 `status` 와 같고, 플래그는 🔵 시작·진행, 🟢 완료, 🟠 확인 필요, 🔴 오류다.
+  ```
+  🔵 *[쇼핑몰] | 개발 | 진행*
+  작업 2/4 완료: TASK-002 상태 필터 UI
+  남은 작업이 끝나면 Codex 검수를 시작합니다.
+  ```
+  스레드 첫 메시지(기능 시작)에 기능 번호와 이름이 들어간다. 문서 언어가 en 이면 영어로 보낸다.
+- 확인 필요(검수 지적, 검증 실패·확정 대기, 승인 되돌림)와 오류, 기능 완료는 `AIWF_SLACK_USER_ID` 를 멘션한다.
+  확인 필요의 셋째 줄은 Claude Code 에서 고를 선택지다. 같은 선택지가 CLI 출력의 `[확인 필요]` 블록에 나오고, aiwf 스킬이 객관식(AskUserQuestion)으로 묻는다.
+- `AIWF_SLACK_LEVEL=important` 면 기능 시작·완료와 확인 필요·오류만 보낸다 (기본 `all`).
 - 전송 실패는 기능 상태를 바꾸지 않는다. 수신 여부가 불명확한 알림은 자동으로 다시 보내지 않는다 (`--retry-uncertain`).
 - Windows 가 아니면 보내지 않고 `UNSUPPORTED_PLATFORM` 으로 남긴다.
 

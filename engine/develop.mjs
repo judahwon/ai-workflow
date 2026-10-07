@@ -8,7 +8,8 @@ import { blocked, usageError, assertId, readJson, writeJsonAtomic, redact } from
 import { withLock } from './lock.mjs';
 import { appendEvent } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
-import { loadRun, saveRun, resolveRun, syncApprovals, detectApprovalDrift, PHASE_LABELS } from './runs.mjs';
+import { loadRun, saveRun, resolveRun, syncApprovals, detectApprovalDrift, driftBlocked, PHASE_LABELS } from './runs.mjs';
+import { outOfScopeDecision } from './decisions.mjs';
 import {
   matchesAllowed, toProjectRelative, protectedReason, featureDocPrefix,
   captureBaseline, changedSinceBaseline, classifyChanges,
@@ -53,7 +54,7 @@ function requireDevelopRun(ctx, opts) {
   const run = resolveRun(ctx, opts);
   const drift = syncApprovals(ctx, run);
   if (drift.length) {
-    throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}). 바뀐 내용을 사용자와 확인하고 다시 승인받는다. 현재 단계: ${PHASE_LABELS[run.phase]}`);
+    throw driftBlocked(ctx, run, drift, ` 바뀐 내용을 사용자와 확인하고 다시 승인받는다. 현재 단계: ${PHASE_LABELS[run.phase]}`);
   }
   if (run.phase !== 'DEVELOP') throw blocked('WRONG_PHASE', `개발 단계가 아니다 (현재 ${PHASE_LABELS[run.phase] ?? run.phase}).`);
   return run;
@@ -169,7 +170,7 @@ export async function cmdTaskDone(ctx, opts) {
           ...outOfScope.map((f) => `  - ${f}`),
           '되돌리거나, 사용자에게 보여주고 허락을 받아 --extra-approved "<사용자 답변 원문>" --user-confirmed 로 다시 실행한다.',
           '범위 자체가 잘못됐다면 tasks.json 을 고치고 설계를 다시 승인받는다.',
-        ].join('\n'));
+        ].join('\n'), { decision: outOfScopeDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, taskId, files: outOfScope }) });
       }
       attempt.changedFiles = inScope;
       attempt.docFiles = docs;
@@ -199,6 +200,7 @@ export async function cmdTaskDone(ctx, opts) {
       summary: `${taskId} 완료: ${summary.slice(0, 300)}`,
       evidencePaths: attempt.changedFiles ?? [],
       nextAction: remaining.length ? `다음 작업: ${remaining[0]}` : '모든 작업 완료 — 검수 단계로 간다.',
+      data: { done: order.length - remaining.length, total: order.length, remaining: remaining.length, taskTitle: run.approvals.design.tasks[taskId]?.contract?.title ?? null },
     });
     lines.unshift(`${taskId} 완료.`);
     lines.push(remaining.length ? `남은 작업: ${remaining.join(', ')}` : `모든 작업 완료 — 단계: ${PHASE_LABELS.REVIEW}`);
@@ -218,7 +220,7 @@ export async function cmdTaskReopen(ctx, opts) {
   return withLock(ctx, 'task-reopen', async () => {
     const run = resolveRun(ctx, opts);
     const drift = syncApprovals(ctx, run);
-    if (drift.length) throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}).`);
+    if (drift.length) throw driftBlocked(ctx, run, drift);
     if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `작업을 다시 여는 것은 검수·확정 단계에서만 한다 (현재 ${PHASE_LABELS[run.phase]}).`);
     taskContract(run, taskId);
     const state = run.tasks[taskId];

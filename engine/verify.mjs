@@ -9,7 +9,8 @@ import { blocked, usageError, assertId, readJson, writeJsonAtomic, atomicWriteFi
 import { withLock } from './lock.mjs';
 import { appendEvent, runDir } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
-import { resolveRun, saveRun, syncApprovals, PHASE_LABELS } from './runs.mjs';
+import { resolveRun, saveRun, syncApprovals, driftBlocked, PHASE_LABELS } from './runs.mjs';
+import { verifyFailedDecision, confirmReadyDecision } from './decisions.mjs';
 import { CHECKS_FILE, checksPath, checksContentHash, validateChecks, loadChecks } from './testplan.mjs';
 import { runCommand, runHttp, runBrowser } from './runners.mjs';
 import { workspaceFingerprint, captureBaseline } from './scope.mjs';
@@ -26,7 +27,7 @@ function requireRunWithoutDrift(ctx, opts, phases) {
   const run = resolveRun(ctx, opts);
   const drift = syncApprovals(ctx, run);
   if (drift.length) {
-    throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}). 현재 단계: ${PHASE_LABELS[run.phase]}`);
+    throw driftBlocked(ctx, run, drift, ` 현재 단계: ${PHASE_LABELS[run.phase]}`);
   }
   if (!phases.includes(run.phase)) {
     throw blocked('WRONG_PHASE', `이 명령은 ${phases.map((p) => PHASE_LABELS[p]).join(' / ')} 단계에서만 쓴다 (현재 ${PHASE_LABELS[run.phase] ?? run.phase}).`);
@@ -144,8 +145,15 @@ export async function cmdVerify(ctx, opts) {
     saveRun(ctx, run);
     const count = (s) => results.filter((r) => r.status === s).length;
     const summary = `검증 V${seq}${verification.partial ? ' (일부)' : ''}: 통과 ${count('PASS')}, 실패 ${count('FAIL')}, 실행 불가 ${count('BLOCKED')}, 사람 확인 대기 ${count('MANUAL')}`;
+    const failedIds = requiredBad.filter((r) => r.status !== 'MANUAL').map((r) => r.id);
+    const manualIds = requiredBad.filter((r) => r.status === 'MANUAL').map((r) => r.id);
+    let decision = null;
+    if (!verification.passed) decision = verifyFailedDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, failed: failedIds, manual: manualIds });
+    else if (run.phase === 'VERIFY' && !verification.partial && confirmationProblems(ctx, run).problems.length === 0) decision = confirmReadyDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId });
     appendEvent(ctx, run, {
       type: 'VERIFY_DONE',
+      data: { passed: count('PASS'), bad: requiredBad.length, badIds: requiredBad.map((r) => r.id), partial: verification.partial },
+      decision,
       status: verification.passed ? 'PASS' : 'FAIL',
       summary,
       reason: requiredBad.length ? requiredBad.map((r) => `${r.id} ${r.status} ${r.code}`).join(', ').slice(0, 900) : null,
@@ -157,7 +165,7 @@ export async function cmdVerify(ctx, opts) {
       lines.push(`  ${r.status.padEnd(7)} ${r.id} ${r.title}${r.required ? '' : ' [선택]'} — ${r.message}${r.logPath ? `  (로그 .ai-workflow/${r.logPath})` : ''}`);
     }
     if (!fingerprint) lines.push('[주의] git 저장소가 아니라 결과가 지금 코드에 대한 것인지 확인하지 못한다.');
-    return { ok: verification.passed, message: lines.join('\n') };
+    return { ok: verification.passed, message: lines.join('\n'), decision };
   });
 }
 
@@ -223,6 +231,7 @@ export async function cmdConfirm(ctx, opts) {
       summary: `기능 확정 (검증 V${latest.seq} 기준)`,
       reason: `사용자 답변: ${text.slice(0, 300)}`,
       nextAction: `${ctx.config.values.AIWF_DOCS_DIR}/ 에 문서를 쓰고 docs-done 한다.`,
+      data: { docsDir: ctx.config.values.AIWF_DOCS_DIR },
     });
     return { ok: true, message: `확정 기록 (검증 V${latest.seq}). 다음 단계: ${PHASE_LABELS.DOCS} — ${ctx.config.values.AIWF_DOCS_DIR}/ 아래 문서를 쓰고 docs-done 한다.` };
   });

@@ -15,6 +15,7 @@ import { validateTests, loadChecks } from './testplan.mjs';
 import { describeIgnore } from './init.mjs';
 import { templateDir } from './context.mjs';
 import { ENGINE_VERSION, stampProjectVersion } from './version.mjs';
+import { approvalDriftDecision } from './decisions.mjs';
 
 export const PHASES = ['DISCUSS', 'DESIGN', 'DEVELOP', 'REVIEW', 'VERIFY', 'DOCS', 'DONE'];
 
@@ -161,8 +162,17 @@ export function syncApprovals(ctx, run) {
       : '승인 이후 설계 또는 작업 목록이 바뀌어 설계 승인을 무효화했다.',
     reason: reasons,
     nextAction: '바뀐 내용을 사용자와 확인한 뒤 다시 승인받는다.',
+    decision: approvalDriftDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, plan: planChanged, reason: reasons }),
   });
   return drift;
+}
+
+// 승인이 풀려 명령을 멈출 때. 사용자가 고를 선택지를 함께 낸다.
+export function driftBlocked(ctx, run, drift, suffix = '') {
+  const reason = drift.map((d) => d.reason).join(', ');
+  return blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${reason}).${suffix}`, {
+    decision: approvalDriftDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, plan: drift.some((d) => d.approval === 'plan'), reason }),
+  });
 }
 
 // ---------- 명령: new ----------
@@ -308,6 +318,7 @@ export async function cmdApprove(ctx, opts) {
       summary,
       reason: `사용자 답변: ${text.slice(0, 300)}`,
       nextAction: opts.phase === 'plan' ? '설계 문서와 작업 목록을 작성한다.' : '작업 순서대로 개발한다.',
+      data: opts.phase === 'plan' ? { requirements: run.approvals.plan.requirementIds.length } : { tasks: run.approvals.design.order.length },
     });
     return { ok: true, message: `${summary}\n다음 단계: ${PHASE_LABELS[run.phase]}` };
   });

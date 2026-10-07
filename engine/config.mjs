@@ -138,6 +138,14 @@ export const CONFIG_SECTIONS = [
         validate: (v) => (['true', 'false'].includes(v) ? null : 'true 또는 false'),
       },
       {
+        name: 'AIWF_SLACK_LEVEL',
+        question: 'Slack 알림을 얼마나 받을까요? (all: 모든 단계 진행, important: 기능 시작·완료와 확인 필요·오류만)',
+        description: 'Slack 알림 수준: all (모든 단계 진행) | important (기능 시작·완료, 확인 필요, 오류만)',
+        default: 'all',
+        required: SLACK_ON,
+        validate: (v) => (['all', 'important'].includes(v) ? null : 'all 또는 important'),
+      },
+      {
         name: 'AIWF_SLACK_WORKSPACE',
         question: 'Slack 워크스페이스 주소는? (예: example.slack.com)',
         description: 'Slack 워크스페이스 주소 (표시용).',

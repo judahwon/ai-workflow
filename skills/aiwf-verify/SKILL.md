@@ -41,8 +41,9 @@ description: ai-workflow 확정 단계(VERIFY). 프로젝트 검사(checks.json)
 
 ## 확정
 
-1. 필수 항목이 모두 PASS 인 전체 검증 결과와 검수 결과를 요약해 사용자에게 보여주고 확정할지 묻는다.
-2. 사용자가 확정을 명시적으로 말하면 원문 그대로 기록한다.
+1. 필수 항목이 모두 PASS 인 전체 검증 결과와 검수 결과를 요약해 사용자에게 보여주고, `verify` 출력의 `[확인 필요]` 블록(확정한다 / 더 확인한다)으로 AskUserQuestion 을 띄운다.
+   검증이 실패했으면 같은 방식으로 실패 블록의 선택지를 묻는다.
+2. 사용자가 "확정한다" 를 고르면 고른 선택지 이름을 그대로 기록한다.
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" confirm --feature FEAT-### --approval-text "<사용자 답변 원문>" --user-confirmed
    ```

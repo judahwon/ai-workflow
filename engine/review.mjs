@@ -8,7 +8,8 @@ import { blocked, isValidId, writeJsonAtomic, atomicWriteFile, redact } from './
 import { withLock } from './lock.mjs';
 import { appendEvent, runDir } from './events.mjs';
 import { requireValidConfig, requireEnvIgnored } from './config.mjs';
-import { resolveRun, saveRun, syncApprovals, PHASE_LABELS } from './runs.mjs';
+import { resolveRun, saveRun, syncApprovals, driftBlocked, PHASE_LABELS } from './runs.mjs';
+import { reviewFindingsDecision, reviewErrorDecision } from './decisions.mjs';
 import { featureDir } from './documents.mjs';
 import { buildInvocation } from './process.mjs';
 import { workspaceFingerprint, diffSince } from './scope.mjs';
@@ -207,7 +208,7 @@ export async function cmdReview(ctx, opts) {
   return withLock(ctx, 'review', async () => {
     const run = resolveRun(ctx, opts);
     const drift = syncApprovals(ctx, run);
-    if (drift.length) throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}).`);
+    if (drift.length) throw driftBlocked(ctx, run, drift);
     if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `검수는 모든 작업이 끝난 뒤에 한다 (현재 ${PHASE_LABELS[run.phase]}).`);
     const { files, base } = featureChanges(run);
     const diff = base && files.length ? diffSince(ctx, base, files) : '';
@@ -223,8 +224,9 @@ export async function cmdReview(ctx, opts) {
       const status = buildInvocation(values.AIWF_CODEX_BIN, ['login', 'status'], { env, platform: ctx.platform });
       const auth = interpretCodexAuth(await ctx.runProcess({ ...status, cwd: ctx.projectRoot, env, input: '', timeoutMs: AUTH_TIMEOUT_MS }));
       if (!auth.ok) {
-        appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${auth.message}`, reason: auth.code, nextAction: '로그인 후 다시 review 한다.' });
-        throw blocked(auth.code, `${auth.message} API 키를 쓰려면 .env 의 AIWF_REVIEW_AUTH 를 any 로 바꾼다.`);
+        const decision = reviewErrorDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, code: auth.code });
+        appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${auth.message}`, reason: auth.code, nextAction: '로그인 후 다시 review 한다.', decision });
+        throw blocked(auth.code, `${auth.message} API 키를 쓰려면 project.env 의 AIWF_REVIEW_AUTH 를 any 로 바꾼다 (init).`, { decision });
       }
     }
     // Windows 는 사용자 설정을 무시하면 샌드박스가 없어 읽기 명령까지 정책으로 거부된다. unelevated 샌드박스는 읽기만 허용한다.
@@ -235,8 +237,9 @@ export async function cmdReview(ctx, opts) {
     const proc = await ctx.runProcess({ ...invocation, cwd: ctx.projectRoot, env, input: prompt, timeoutMs: REVIEW_TIMEOUT_MS });
     const outcome = interpret(proc, run.approvals.plan.requirementIds);
     if (!outcome.ok) {
-      appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${outcome.message}`, reason: outcome.code, nextAction: '원인을 해결해 다시 review 하거나, 사용자 허락으로 review-accept 한다.' });
-      throw blocked(outcome.code, `${outcome.message} 사용자 허락이 있으면 review-accept 로 넘길 수 있다.`);
+      const decision = reviewErrorDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, code: outcome.code });
+      appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${outcome.message}`, reason: outcome.code, nextAction: '원인을 해결해 다시 review 하거나, 사용자 허락으로 review-accept 한다.', decision });
+      throw blocked(outcome.code, `${outcome.message} 사용자 허락이 있으면 review-accept 로 넘길 수 있다.`, { decision });
     }
     const review = outcome.review;
     const record = { seq, at: ctx.now(), requestedModel: values.AIWF_REVIEW_MODEL, auth: values.AIWF_REVIEW_AUTH === 'chatgpt' ? 'CHATGPT' : 'UNCHECKED', fingerprint, base, files, ...review };
@@ -250,8 +253,12 @@ export async function cmdReview(ctx, opts) {
       run.phase = 'REVIEW';
     }
     saveRun(ctx, run);
+    const high = review.findings.filter((f) => f.severity === 'high').length;
+    const decision = review.verdict === 'APPROVED' ? null : reviewFindingsDecision(ctx.config.values.AIWF_DOC_LANGUAGE, { featureId: run.featureId, findings: review.findings.length, high });
     appendEvent(ctx, run, {
       type: 'REVIEW_DONE', status: review.verdict, actor: 'reviewer',
+      data: { findings: review.findings.length, high },
+      decision,
       summary: `검수 ${name}: ${review.verdict} — ${review.summary.slice(0, 300)}`,
       reason: review.findings.length ? `지적 ${review.findings.length}건 (high ${review.findings.filter((f) => f.severity === 'high').length})` : null,
       evidencePaths: [`runs/${run.runId}/reviews/${name}.json`],
@@ -269,7 +276,7 @@ export async function cmdReview(ctx, opts) {
       for (const f of review.findings) lines.push(`  [${f.severity}] ${f.file ?? ''}${f.line ? `:${f.line}` : ''} ${f.message}`);
     }
     lines.push('', `다음 단계: ${PHASE_LABELS[run.phase]}`);
-    return { ok: review.verdict === 'APPROVED', message: lines.join('\n') };
+    return { ok: review.verdict === 'APPROVED', message: lines.join('\n'), decision };
   });
 }
 
@@ -280,7 +287,7 @@ export async function cmdReviewAccept(ctx, opts) {
   return withLock(ctx, 'review-accept', async () => {
     const run = resolveRun(ctx, opts);
     const drift = syncApprovals(ctx, run);
-    if (drift.length) throw blocked('APPROVAL_DRIFT', `승인 이후 문서가 바뀌어 승인을 되돌렸다 (${drift.map((d) => d.reason).join(', ')}).`);
+    if (drift.length) throw driftBlocked(ctx, run, drift);
     if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `검수 단계가 아니다 (현재 ${PHASE_LABELS[run.phase]}).`);
     const last = run.reviews?.at(-1) ?? null;
     run.reviewOutcome = { type: 'ACCEPTED', reviewSeq: last?.seq ?? null, at: ctx.now(), fingerprint: workspaceFingerprint(ctx), approvalText: text };

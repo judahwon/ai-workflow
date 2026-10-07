@@ -18,7 +18,8 @@ description: ai-workflow 검수 단계(REVIEW). 모든 작업이 끝난 기능�
    요청 모델(`AIWF_REVIEW_MODEL`)은 기록되지만 실제로 응답한 모델은 확인할 수 없다는 점도 알린다.
 3. 판정에 따라:
    - **APPROVED** → 엔진이 확정(검증) 단계로 옮긴다. `aiwf-verify` 로 간다.
-   - **CHANGES_REQUESTED** → 지적마다 고칠지 사용자와 정한다 (AskUserQuestion, 권장안 먼저).
+   - **CHANGES_REQUESTED** → 출력의 `[확인 필요]` 블록 선택지(고친다 / 그대로 넘긴다 / 다시 검수)로 AskUserQuestion 을 띄운다 (`aiwf` 스킬의 방식).
+     지적이 여러 건이면 지적을 먼저 보여주고, "고친다" 를 고르면 어느 작업을 다시 열지 지적별로 정한다.
      - 고친다 → 해당 작업을 다시 연다. 이유에 검수 번호와 지적을 적는다.
        ```bash
        node "${CLAUDE_PLUGIN_ROOT}/engine/cli.mjs" task-reopen --feature FEAT-### --task TASK-### --reason "R001: <지적 요약>"

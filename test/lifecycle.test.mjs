@@ -216,6 +216,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   r = await run('review', ...F);
   assert.equal(r.code, 3);
   assert.match(r.out, /CHANGES_REQUESTED[\s\S]*\[high\] src\/pages\/orders\/List\.tsx:3 빈 결과 처리 없음/);
+  assert.match(r.out, /\[확인 필요\] Codex 검수 지적 1건 \(중요 1건\)[\s\S]*1\. 고친다[\s\S]*2\. 그대로 넘긴다 — .*\[승인\][\s\S]*3\. 다시 검수/);
   const call = extra.runProcess.calls[0];
   assert.match(call.text, /exec --sandbox read-only .*--model gpt-6\.1-sol/);
   assert.equal(call.text.includes('windows.sandbox=unelevated'), process.platform === 'win32', 'Windows 에서만 읽기 샌드박스를 켠다');
@@ -246,6 +247,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   assert.match(r.out, /PASS\s+TEST-001/);
   assert.match(r.out, /PASS\s+TEST-002/);
   assert.match(r.out, /MANUAL\s+TEST-003/);
+  assert.match(r.out, /\[확인 필요\][\s\S]*1\. 수동 테스트 확인/, '사람이 확인할 테스트가 남으면 먼저 그것을 고르게 한다');
   r = await run('confirm', ...F, ...CONFIRMED);
   assert.match(r.out, /NOT_READY[\s\S]*TEST-003/);
   r = await run('test-confirm', ...F, '--test', 'TEST-003', '--approval-text', '눌러 보니 잘 바뀐다', '--user-confirmed');
@@ -256,6 +258,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   assert.match(r.out, /NOT_READY/, '일부 검증으로는 확정하지 않는다');
   r = await run('verify', ...F);
   assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\[확인 필요\] 검수·검증이 모두 통과했습니다\. 기능을 확정할까요\?[\s\S]*1\. 확정한다[\s\S]*→ confirm --feature FEAT-001/);
 
   // 검증 뒤 코드가 바뀌면 확정할 수 없다.
   writeSource(p, 'src/pages/orders/List.tsx', 'v3 몰래 수정');
@@ -268,7 +271,7 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
 
   // 문서 단계: 코드 수정은 막고, 문서가 있어야 끝난다.
   r = await run('docs-done', ...F, '--summary', '문서');
-  assert.match(r.out, /DOCS_EMPTY/);
+  assert.match(r.out, /DOCS_EMPTY[\s\S]*\[확인 필요\][\s\S]*문서를 쓴다[\s\S]*문서 필요 없음/);
   writeSource(p, 'src/pages/orders/Other.tsx', 'late change');
   writeSource(p, 'README.md', '# 주문 상태 필터');
   r = await run('docs-done', ...F, '--summary', '기능 문서 추가');
@@ -357,7 +360,7 @@ test('Slack: 단계 이벤트만 실행별 스레드로 보내고, 실패는 상
   assert.equal(sent.length, 2);
   assert.equal(sent[0].threadTs, null);
   assert.equal(sent[1].threadTs, '1700000000.000001', '같은 실행은 첫 메시지의 스레드에 단다');
-  assert.match(sent[0].text, /\[테스트 프로젝트\] RUN_CREATED — FEAT-001/);
+  assert.match(sent[0].text, /^🔵 \*\[테스트 프로젝트\] \| 기획 \| 시작\*\nFEAT-001 알림 기능 기획 시작\.\n요구사항이 정리되면/);
 
   // 전송 실패: 설정 오류는 실패로 남고, 기능 상태는 그대로다.
   p.write('features/FEAT-001/requirements.md', `${REQUIREMENTS}- REQ-003: 추가\n`);
@@ -369,12 +372,13 @@ test('Slack: 단계 이벤트만 실행별 스레드로 보내고, 실패는 상
   // 설정 오류가 나면 같은 이유로 실패할 나머지는 대기열에 남긴다.
   r = await run({}, 'notify');
   assert.match(r.out, /보냄 1/);
-  assert.match(sent.at(-1).text, /REQUIREMENTS_CONFIRMED/);
+  assert.match(sent.at(-1).text, /\| 설계 \| 시작\*\n요구사항 v1\.0 승인 \(REQ 3개\)/);
   r = await run({}, 'notify');
   assert.match(r.out, /보냄 0/, '실패한 알림은 --retry-failed 없이 다시 보내지 않는다');
   r = await run({}, 'notify', '--retry-failed');
   assert.match(r.out, /보냄 1/);
-  assert.match(sent.at(-1).text, /<@U0123456789>/, '되돌림 이벤트는 사용자를 멘션한다');
+  assert.match(sent.at(-1).text, /^<@U0123456789> 🟠 \*\[테스트 프로젝트\] \| /, '되돌림 이벤트는 확인 필요로 사용자를 멘션한다');
+  assert.match(sent.at(-1).text, /할 일: Claude Code 에서 선택 — 바뀐 내용으로 승인 \/ 변경 되돌리기$/);
 
   // Windows 가 아니면 보내지 않고 이유를 남긴다.
   r = await run({ platform: 'linux' }, 'notify', '--test');

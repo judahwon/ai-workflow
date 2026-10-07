@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { appendJsonl, readJsonl, writeJsonAtomic, readJson, redact } from './util.mjs';
 import { eventsFile, notificationsFile, notificationsEnabled, runDir } from './events.mjs';
+import { formatAlert } from './alerts.mjs';
 
 export const MAX_ATTEMPTS = 3;
 const MAX_PER_FLUSH = 30;
@@ -22,6 +23,9 @@ export function latestNotificationStates(ctx, runId) {
 
 export function formatMessage(ctx, event) {
   const values = ctx.config.values;
+  const alert = formatAlert(event, values);
+  if (alert) return redact(alert).slice(0, 3000);
+  // 알림 문구가 정해지지 않은 이벤트는 원래 형식으로 보낸다.
   const attention = ATTENTION.has(event.type)
     || (event.type === 'REVIEW_DONE' && event.status !== 'APPROVED')
     || (event.type === 'VERIFY_DONE' && event.status !== 'PASS');
