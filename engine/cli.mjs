@@ -6,7 +6,12 @@ import { WorkflowError, usageError } from './util.mjs';
 import { createContext } from './context.mjs';
 import { cmdInit, cmdQuestions } from './init.mjs';
 import { cmdNew, cmdApprove, cmdStatus, cmdUnlock } from './runs.mjs';
-import { cmdTaskStart, cmdTaskDone, cmdTaskPause, cmdCheckScope } from './develop.mjs';
+import { cmdTaskStart, cmdTaskDone, cmdTaskPause, cmdTaskReopen, cmdCheckScope } from './develop.mjs';
+import { cmdChecksSet, cmdVerify, cmdTestConfirm, cmdConfirm } from './verify.mjs';
+import { cmdReview, cmdReviewAccept } from './review.mjs';
+import { cmdDocsDone } from './docs.mjs';
+import { cmdNotify, flushNotifications, describeFlush } from './notify.mjs';
+import { notificationsEnabled } from './events.mjs';
 
 const S = 'string';
 const B = 'boolean';
@@ -22,7 +27,16 @@ export const COMMANDS = {
   'task-start': { options: { run: S, feature: S, task: S }, run: cmdTaskStart },
   'task-done': { options: { run: S, feature: S, task: S, summary: S, 'extra-approved': S, 'user-confirmed': B }, run: cmdTaskDone },
   'task-pause': { options: {}, run: cmdTaskPause },
+  'task-reopen': { options: { run: S, feature: S, task: S, reason: S }, run: cmdTaskReopen },
   'check-scope': { options: { path: S }, run: cmdCheckScope },
+  'checks-set': { options: { from: S, 'approval-text': S, 'user-confirmed': B }, run: cmdChecksSet },
+  review: { options: { run: S, feature: S }, run: cmdReview },
+  'review-accept': { options: { run: S, feature: S, 'approval-text': S, 'user-confirmed': B }, run: cmdReviewAccept },
+  verify: { options: { run: S, feature: S, only: LIST }, run: cmdVerify },
+  'test-confirm': { options: { run: S, feature: S, test: S, 'approval-text': S, 'user-confirmed': B }, run: cmdTestConfirm },
+  confirm: { options: { run: S, feature: S, 'approval-text': S, 'user-confirmed': B }, run: cmdConfirm },
+  'docs-done': { options: { run: S, feature: S, summary: S, 'extra-approved': S, 'no-docs-approved': S, 'user-confirmed': B }, run: cmdDocsDone },
+  notify: { options: { test: B, 'retry-uncertain': B, 'retry-failed': B }, run: cmdNotify },
   unlock: { options: { stale: B, reason: S, 'force-unverified': B }, run: cmdUnlock },
 };
 
@@ -53,6 +67,30 @@ export const HELP = `사용: node .ai-workflow/engine/cli.mjs <command> [options
       모든 작업이 끝나면 검수 단계로 간다.
   task-pause                진행 중인 작업을 일시 중지하고 수정 범위 제한을 푼다.
   check-scope --path <파일>  지금 이 파일을 고칠 수 있는지 (훅과 같은 판단)
+
+검수·검증·확정 (모든 작업이 끝나면 검수 단계)
+  review (--run RUN | --feature FEAT)
+      Codex(읽기 전용)가 요구사항·설계 대비 변경을 검토한다. 승인이면 검증 단계로 간다.
+  review-accept (--run|--feature) --approval-text "<사용자 답변 원문>" --user-confirmed
+      남은 지적이나 Codex 없이 사용자 허락으로 검수를 넘긴다.
+  task-reopen (--run|--feature) --task TASK-### --reason "<이유>"
+      검수·검증에서 고칠 것이 나오면 작업을 다시 열고 개발 단계로 돌아간다.
+  checks-set [--from <JSON 파일>] --approval-text "<사용자 답변 원문>" --user-confirmed
+      프로젝트 검사(.ai-workflow/checks.json: 린트·빌드·테스트 명령, 서버 주소)를 승인과 함께 저장한다.
+  verify (--run|--feature) [--only ID ...]
+      프로젝트 검사와 설계 승인된 기능 테스트(tests.json)를 실행한다. --only 는 일부만 (확정에는 전체 필요).
+  test-confirm (--run|--feature) --test TEST-### --approval-text "<사용자 답변 원문>" --user-confirmed
+      사람이 확인하는 manual 테스트의 통과를 기록한다.
+  confirm (--run|--feature) --approval-text "<사용자 답변 원문>" --user-confirmed
+      검수·전체 검증이 지금 코드 기준으로 통과했을 때 확정한다 → 문서 단계.
+
+문서
+  docs-done (--run|--feature) --summary "<쓴 문서>" [--extra-approved "..." | --no-docs-approved "..."] [--user-confirmed]
+      확정 이후 문서 폴더(AIWF_DOCS_DIR)만 바뀌었는지 확인하고 report.md 를 남긴 뒤 완료한다.
+
+알림
+  notify [--test] [--retry-uncertain] [--retry-failed]
+      Slack 알림 대기열을 보낸다 (다른 명령 뒤에도 자동으로 보낸다). --test 는 연결 확인 메시지.
 
 관리
   unlock --stale --reason "<확인 내용>" [--force-unverified]
@@ -94,10 +132,26 @@ export function parseArgs(argv) {
   return { command, opts };
 }
 
+// 실행 뒤 Slack 대기열을 자동으로 보내지 않는 명령.
+const QUIET_COMMANDS = new Set(['help', 'init', 'questions', 'status', 'check-scope', 'notify', 'unlock']);
+
+async function autoNotify(ctx, command) {
+  if (!ctx || QUIET_COMMANDS.has(command) || !notificationsEnabled(ctx) || ctx.config.errors.length) return;
+  try {
+    const result = await flushNotifications(ctx);
+    if (result.runs.some((r) => r.sent || r.failed || r.uncertain || r.retryPending)) ctx.out(describeFlush(result));
+  } catch (e) {
+    ctx.out(`[알림] Slack 전송 중 오류 (${e?.code ?? e?.name ?? 'Error'}). notify 로 다시 보낸다.`);
+  }
+}
+
 export async function main(argv, ctxOverrides = {}) {
   let ctx;
+  let command;
   try {
-    const { command, opts } = parseArgs(argv);
+    const parsed = parseArgs(argv);
+    command = parsed.command;
+    const { opts } = parsed;
     if (command === 'help') {
       (ctxOverrides.out ?? ((l) => process.stdout.write(`${l}\n`)))(HELP);
       return 0;
@@ -105,11 +159,13 @@ export async function main(argv, ctxOverrides = {}) {
     ctx = createContext(ctxOverrides);
     const result = await COMMANDS[command].run(ctx, opts);
     if (result?.message) ctx.out(result.message);
+    await autoNotify(ctx, command);
     return result?.ok === false ? 3 : 0;
   } catch (e) {
     const out = ctx?.out ?? ctxOverrides.out ?? ((l) => process.stderr.write(`${l}\n`));
     if (e instanceof WorkflowError) {
       out(`[${e.code}] ${e.message}`);
+      await autoNotify(ctx, command);
       return e.exitCode;
     }
     // 원문 스택에 경로·환경 정보가 섞일 수 있어 형식과 코드만 출력한다.
