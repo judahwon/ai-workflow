@@ -15,6 +15,29 @@ import { workspaceFingerprint, diffSince } from './scope.mjs';
 import { requireApproval } from './verify.mjs';
 
 const REVIEW_TIMEOUT_MS = 30 * 60 * 1000;
+const AUTH_TIMEOUT_MS = 30 * 1000;
+// API 키 인증으로 넘어가지 않도록 chatgpt 모드에서는 검수자에게 넘기지 않는 환경변수.
+const API_KEY_ENV = /^(OPENAI_API_KEY|CODEX_API_KEY|AZURE_OPENAI_API_KEY|OPENAI_.*_KEY)$/i;
+
+export function reviewerEnv(env, authMode) {
+  if (authMode !== 'chatgpt') return env;
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !API_KEY_ENV.test(k)));
+}
+
+// `codex login status` 결과 판정. 출력에 키 일부가 섞일 수 있어 내용은 기록하지 않는다.
+export function interpretCodexAuth(proc) {
+  if (proc.spawnError) {
+    return proc.spawnError.code === 'ENOENT'
+      ? { ok: false, code: 'CODEX_NOT_FOUND', message: 'codex 실행 파일을 찾지 못했다. .env 의 AIWF_CODEX_BIN 을 확인한다.' }
+      : { ok: false, code: 'SPAWN_FAILED', message: `codex 시작 실패 (${proc.spawnError.code}).` };
+  }
+  if (proc.timedOut) return { ok: false, code: 'TIMEOUT', message: 'codex login status 시간 초과.' };
+  const text = `${proc.stdout ?? ''}\n${proc.stderr ?? ''}`;
+  const apiKey = /api[\s_-]?key/i.test(text);
+  if (proc.exitCode === 0 && /chatgpt/i.test(text) && !apiKey) return { ok: true, code: 'CHATGPT' };
+  if (apiKey) return { ok: false, code: 'AUTH_NOT_CHATGPT', message: 'codex 가 API 키로 로그인돼 있다. 과금을 막기 위해 검수를 멈췄다. `codex logout` 후 `codex login` 에서 ChatGPT 로 로그인한다.' };
+  return { ok: false, code: 'AUTH_NOT_CHATGPT', message: 'codex 의 ChatGPT 로그인을 확인하지 못했다. `codex login` 에서 ChatGPT 로 로그인한다.' };
+}
 
 function parseJsonLines(text) {
   const items = [];
@@ -195,17 +218,26 @@ export async function cmdReview(ctx, opts) {
     const name = `R${String(seq).padStart(3, '0')}`;
     atomicWriteFile(path.join(dir, `${name}-prompt.md`), prompt);
     const fingerprint = workspaceFingerprint(ctx);
+    const env = reviewerEnv(ctx.env, values.AIWF_REVIEW_AUTH);
+    if (values.AIWF_REVIEW_AUTH === 'chatgpt') {
+      const status = buildInvocation(values.AIWF_CODEX_BIN, ['login', 'status'], { env, platform: ctx.platform });
+      const auth = interpretCodexAuth(await ctx.runProcess({ ...status, cwd: ctx.projectRoot, env, input: '', timeoutMs: AUTH_TIMEOUT_MS }));
+      if (!auth.ok) {
+        appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${auth.message}`, reason: auth.code, nextAction: '로그인 후 다시 review 한다.' });
+        throw blocked(auth.code, `${auth.message} API 키를 쓰려면 .env 의 AIWF_REVIEW_AUTH 를 any 로 바꾼다.`);
+      }
+    }
     const invocation = buildInvocation(values.AIWF_CODEX_BIN, [
       'exec', '--sandbox', 'read-only', '--json', '--ignore-user-config', '--ephemeral', '--model', values.AIWF_REVIEW_MODEL, '-C', ctx.projectRoot, '-',
-    ], { env: ctx.env, platform: ctx.platform });
-    const proc = await ctx.runProcess({ ...invocation, cwd: ctx.projectRoot, env: ctx.env, input: prompt, timeoutMs: REVIEW_TIMEOUT_MS });
+    ], { env, platform: ctx.platform });
+    const proc = await ctx.runProcess({ ...invocation, cwd: ctx.projectRoot, env, input: prompt, timeoutMs: REVIEW_TIMEOUT_MS });
     const outcome = interpret(proc, run.approvals.plan.requirementIds);
     if (!outcome.ok) {
       appendEvent(ctx, run, { type: 'REVIEW_FAILED', status: run.phase, summary: `검수 실패: ${outcome.message}`, reason: outcome.code, nextAction: '원인을 해결해 다시 review 하거나, 사용자 허락으로 review-accept 한다.' });
       throw blocked(outcome.code, `${outcome.message} 사용자 허락이 있으면 review-accept 로 넘길 수 있다.`);
     }
     const review = outcome.review;
-    const record = { seq, at: ctx.now(), requestedModel: values.AIWF_REVIEW_MODEL, fingerprint, base, files, ...review };
+    const record = { seq, at: ctx.now(), requestedModel: values.AIWF_REVIEW_MODEL, auth: values.AIWF_REVIEW_AUTH === 'chatgpt' ? 'CHATGPT' : 'UNCHECKED', fingerprint, base, files, ...review };
     writeJsonAtomic(path.join(dir, `${name}.json`), record);
     run.reviews.push({ seq, at: record.at, verdict: review.verdict, summary: review.summary.slice(0, 300), findings: review.findings.length, file: `runs/${run.runId}/reviews/${name}.json` });
     if (review.verdict === 'APPROVED') {

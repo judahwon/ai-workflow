@@ -86,6 +86,14 @@ export const CONFIG_SECTIONS = [
         validate: (v) => (/^[a-z0-9][a-z0-9.-]{1,60}$/.test(v) ? null : '소문자·숫자·점·하이픈 모델 ID'),
       },
       {
+        name: 'AIWF_REVIEW_AUTH',
+        question: '검수 Codex 인증 방식은? (chatgpt: ChatGPT 구독 로그인만 허용, any: API 키도 허용)',
+        description: '검수 Codex 인증: chatgpt (ChatGPT 로그인이 아니면 검수를 막고 API 키 환경변수를 넘기지 않는다) | any',
+        default: 'chatgpt',
+        required: true,
+        validate: (v) => (['chatgpt', 'any'].includes(v) ? null : 'chatgpt 또는 any'),
+      },
+      {
         name: 'AIWF_PLAYWRIGHT_MODULE',
         question: '브라우저 테스트용 playwright 모듈 폴더 절대 경로는? (브라우저 테스트를 안 쓰면 비워 둠)',
         description: '브라우저 테스트에 쓸 playwright 모듈 폴더 절대 경로. 비우면 브라우저 테스트를 쓰지 않는다.',
