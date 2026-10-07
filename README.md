@@ -53,7 +53,7 @@ node .ai-workflow/engine/cli.mjs questions                   # 채울 항목 목
 | 프로젝트 | `AIWF_PROJECT_NAME` | ✔ |
 | | `AIWF_PROJECT_SUMMARY`, `AIWF_ORGANIZATION`, `AIWF_ORGANIZATION_NOTICE` | |
 | | `AIWF_DOC_LANGUAGE` (ko/en, 기본 ko), `AIWF_DOCS_DIR` (기본 docs) | ✔ (기본값) |
-| 이 PC | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN`, `AIWF_REVIEW_MODEL` | ✔ (기본값) |
+| 이 PC | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN`, `AIWF_REVIEW_MODEL`, `AIWF_REVIEW_AUTH` (chatgpt/any, 기본 chatgpt) | ✔ (기본값) |
 | | `AIWF_PLAYWRIGHT_MODULE`, `AIWF_BROWSER_CHANNEL` | |
 | 알림 | `AIWF_SLACK_ENABLED` (기본 false) | ✔ (기본값) |
 | | `AIWF_SLACK_WORKSPACE`, `AIWF_SLACK_USER_ID`, `AIWF_SLACK_CHANNEL_ID`, `AIWF_SLACK_TOKEN_FILE` | Slack 사용 시 |
@@ -114,6 +114,8 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 - **검수**: `AIWF_CODEX_BIN exec --sandbox read-only --json --ignore-user-config --ephemeral --model AIWF_REVIEW_MODEL -C <루트> -` 에
   요구사항·설계·작업 계약·바뀐 파일·diff 를 넘기고, REQ 마다 MET/NOT_MET/UNVERIFIED 와 지적을 담은 JSON 을 받는다.
   형식이 틀리거나 파일 변경을 시도하면 결과로 인정하지 않는다. 요청 모델은 기록하지만 실제 응답 모델은 확인할 수 없다.
+- **검수 인증**: 기본(`AIWF_REVIEW_AUTH=chatgpt`)은 ChatGPT 구독 로그인만 쓴다. 검수 전에 `codex login status` 로 ChatGPT 로그인을 확인하고,
+  아니면(API 키 로그인·미로그인) 막는다. `OPENAI_API_KEY` 등 API 키 환경변수는 검수자에게 넘기지 않는다. API 키 과금을 허용하려면 `any`.
 - **프로젝트 검사** (`checks.json`): 린트·빌드·단위 테스트 명령과 http·browser 테스트가 쓰는 서버 주소(`origins`).
   `checks-set` 으로 승인과 함께 저장하고, 승인 뒤 파일이 바뀌면 검증을 막는다. 형식은 `templates/checks.example.json`.
 - **기능 테스트** (`tests.json`, 설계 승인에 포함): 형식은 `templates/tests.example.json`.

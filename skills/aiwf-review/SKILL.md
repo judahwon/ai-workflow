@@ -33,7 +33,9 @@ description: ai-workflow 검수 단계(REVIEW). 모든 작업이 끝난 기능�
 ## 검수가 실행되지 않을 때
 
 - `CODEX_NOT_FOUND`: `.ai-workflow/.env` 의 `AIWF_CODEX_BIN` 을 확인한다 (`aiwf-setup`).
-- `CODEX_ERROR`: 인증·사용량 문제일 수 있다. 사용자에게 `codex login status` 확인을 부탁한다.
+- `AUTH_NOT_CHATGPT`: codex 가 ChatGPT 로그인이 아니다 (API 키 로그인이거나 미로그인). 사용자에게 `codex login` 에서 ChatGPT 로 로그인하도록 부탁한다.
+  API 키 과금을 감수하겠다고 사용자가 말한 경우에만 `.env` 의 `AIWF_REVIEW_AUTH` 를 `any` 로 바꾼다 (`aiwf-setup`).
+- `CODEX_ERROR`: 사용량 제한·네트워크 문제일 수 있다. 사용자에게 알린다.
 - `REVIEW_NOT_JSON` 등 형식 오류: 다시 `review` 한다. 계속되면 사용자에게 알린다.
 - Codex 없이 진행할지는 **사용자가 정한다.** 허락하면 `review-accept` 로 넘기고, 이 세션이 대신 검수했다고 말하지 않는다.
 
