@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from '../engine/cli.mjs';
 import { checkAllowedPattern, orderTasks } from '../engine/tasks.mjs';
@@ -129,13 +130,21 @@ test('install: .ai-workflow 를 제외하지 않은 린터 설정을 알린다',
 test('install --local: .gitignore 대신 .git/info/exclude 에 한 번만 넣는다', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
   try {
-    fs.mkdirSync(path.join(dir, '.git', 'info'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.git', 'info', 'exclude'), '# 기존\n/.ai-workflow/');
+    spawnSync('git', ['init', '-q'], { cwd: dir });
+    const excludeFile = path.join(dir, '.git', 'info', 'exclude');
+    fs.writeFileSync(excludeFile, '# 기존\n/.ai-workflow/');
     const r = install(dir, { claude: false, local: true });
     assert.deepEqual(r.localExcludes, ['/.claude/settings.json', '/.claude/skills/aiwf*/']);
     assert.ok(!fs.existsSync(path.join(dir, '.gitignore')));
     assert.deepEqual(install(dir, { claude: false, local: true, upgrade: true }).localExcludes, []);
-    assert.equal(fs.readFileSync(path.join(dir, '.git', 'info', 'exclude'), 'utf8'), '# 기존\n/.ai-workflow/\n# ai-workflow (로컬 전용)\n/.claude/settings.json\n/.claude/skills/aiwf*/\n');
+    assert.equal(fs.readFileSync(excludeFile, 'utf8'), '# 기존\n/.ai-workflow/\n# ai-workflow (로컬 전용)\n/.claude/settings.json\n/.claude/skills/aiwf*/\n');
+
+    // 저장소의 하위 폴더 프로젝트는 그 폴더 기준 경로로 넣고, 실제로 git 이 무시한다.
+    const sub = path.join(dir, 'apps', 'web');
+    fs.mkdirSync(sub, { recursive: true });
+    assert.deepEqual(install(sub, { claude: false, local: true }).localExcludes, ['/apps/web/.ai-workflow/', '/apps/web/.claude/settings.json', '/apps/web/.claude/skills/aiwf*/']);
+    const status = spawnSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'apps'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(status.stdout, '');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

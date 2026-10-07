@@ -6,6 +6,7 @@
 //   --no-claude : .claude/ 아래(스킬·훅)는 건드리지 않는다.
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ensureGitignore, writeEnvExample } from './engine/init.mjs';
 
@@ -97,14 +98,18 @@ export function lintersNeedingIgnore(root) {
 const LOCAL_EXCLUDES = ['/.ai-workflow/', '/.claude/settings.json', '/.claude/skills/aiwf*/'];
 
 // --local: 프로젝트 .gitignore 는 건드리지 않고 이 PC 의 .git/info/exclude 에만 넣어 저장소에 흔적을 남기지 않는다.
+// 프로젝트가 저장소의 하위 폴더여도 저장소의 exclude 에 그 폴더 기준 경로로 넣는다.
 export function addLocalExcludes(root) {
-  const gitDir = path.join(root, '.git');
-  if (!fs.existsSync(gitDir) || !fs.statSync(gitDir).isDirectory()) return null;
-  const file = path.join(gitDir, 'info', 'exclude');
+  const git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  const excludePath = git(['rev-parse', '--git-path', 'info/exclude']);
+  const prefix = git(['rev-parse', '--show-prefix']);
+  if (excludePath.status !== 0 || prefix.status !== 0) return null;
+  const file = path.resolve(root, excludePath.stdout.trim());
+  const base = `/${prefix.stdout.trim()}`.replace(/\/$/, '');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const lines = new Set(current.split(/\r?\n/).map((l) => l.trim()));
-  const added = LOCAL_EXCLUDES.filter((p) => !lines.has(p));
+  const added = LOCAL_EXCLUDES.map((p) => `${base}${p}`).filter((p) => !lines.has(p));
   if (added.length) fs.appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}# ai-workflow (로컬 전용)\n${added.join('\n')}\n`);
   return added;
 }
