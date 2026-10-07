@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from '../engine/cli.mjs';
 import { checkAllowedPattern, orderTasks } from '../engine/tasks.mjs';
 import { readVersion, readOpenQuestions } from '../engine/documents.mjs';
-import { install } from '../install.mjs';
+import { install, registerHook, HOOK_MARKER } from '../install.mjs';
 import { setupProject } from './helpers.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -73,9 +74,53 @@ test('엔진·템플릿에 특정 프로젝트·개인 정보를 하드코딩하
   };
   walk(path.join(ROOT, 'engine'));
   walk(path.join(ROOT, 'templates'));
+  walk(path.join(ROOT, 'skills'));
   files.push(path.join(ROOT, 'install.mjs'));
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8');
     for (const re of forbidden) assert.ok(!re.test(text), `${path.relative(ROOT, file)} 에 ${re}`);
+  }
+});
+
+test('install: 스킬을 .claude/skills 에 두고 훅은 기존 설정을 지키며 한 번만 등록한다', async (t) => {
+  const p = setupProject();
+  t.after(p.cleanup);
+  const claudeDir = path.join(p.projectRoot, '.claude');
+  for (const name of ['aiwf', 'aiwf-setup', 'aiwf-discuss', 'aiwf-design', 'aiwf-develop']) {
+    const text = fs.readFileSync(path.join(claudeDir, 'skills', name, 'SKILL.md'), 'utf8');
+    assert.match(text, new RegExp(`^---\r?\nname: ${name}\r?\n`), name);
+  }
+  const settingsFile = path.join(claudeDir, 'settings.json');
+  const countHooks = () => JSON.parse(fs.readFileSync(settingsFile, 'utf8')).hooks.PreToolUse
+    .filter((e) => e.hooks.some((h) => h.command.includes(HOOK_MARKER))).length;
+  assert.equal(countHooks(), 1);
+
+  // 사용자 설정·다른 훅·다른 스킬은 유지하고, 프레임워크에서 사라진 aiwf 스킬은 지운다.
+  fs.writeFileSync(settingsFile, JSON.stringify({ permissions: { allow: ['Bash(ls)'] }, hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] }] } }));
+  fs.mkdirSync(path.join(claudeDir, 'skills', 'aiwf-old'), { recursive: true });
+  fs.mkdirSync(path.join(claudeDir, 'skills', 'my-skill'), { recursive: true });
+  install(p.projectRoot, { upgrade: true });
+  const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  assert.deepEqual(settings.permissions, { allow: ['Bash(ls)'] });
+  assert.equal(settings.hooks.PreToolUse.length, 2);
+  assert.equal(countHooks(), 1);
+  assert.ok(!fs.existsSync(path.join(claudeDir, 'skills', 'aiwf-old')));
+  assert.ok(fs.existsSync(path.join(claudeDir, 'skills', 'my-skill')));
+  install(p.projectRoot, { upgrade: true });
+  assert.equal(countHooks(), 1, '재설치해도 중복 등록하지 않는다');
+
+  fs.writeFileSync(settingsFile, '{ 깨진 json');
+  assert.equal(registerHook(p.projectRoot), 'invalid');
+  assert.equal(fs.readFileSync(settingsFile, 'utf8'), '{ 깨진 json', '해석할 수 없으면 건드리지 않는다');
+});
+
+test('install --no-claude: .claude 를 만들지 않는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiwf-'));
+  try {
+    const r = install(dir, { claude: false });
+    assert.equal(r.hook, 'disabled');
+    assert.ok(!fs.existsSync(path.join(dir, '.claude')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
