@@ -1,6 +1,6 @@
 {
   "name": "ai-workflow",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "기능을 논의·기획·설계·개발·검수·확정·문서 순서로 진행하는 워크플로. 엔진이 사용자 승인을 문서 해시에 묶고, 작업별 파일 수정 범위를 지킨다.",
   "author": { "name": "주다훤" },
   "keywords": ["workflow", "spec", "review", "approval", "korean"]

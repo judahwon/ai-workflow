@@ -10,6 +10,10 @@ import { formatAlert } from './alerts.mjs';
 export const MAX_ATTEMPTS = 3;
 const MAX_PER_FLUSH = 30;
 const TRANSPORT_TIMEOUT_MS = 60 * 1000;
+const UPLOAD_TIMEOUT_MS = 3 * 60 * 1000;
+// 한 알림에 붙이는 이미지 상한 (Slack completeUploadExternal 한 번에 10개).
+export const MAX_ATTACHMENTS = 10;
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 // 사용자가 반응해야 하는 이벤트는 사용자를 멘션한다.
 const ATTENTION = new Set(['REQUIREMENTS_UPDATED', 'DESIGN_UPDATED', 'REVIEW_FAILED', 'RUN_DONE']);
 
@@ -76,8 +80,56 @@ function classify(ctx, proc, out, attempts) {
   return failOrRetry({ httpStatus: out.httpStatus ?? null, slackError: typeof out.slackError === 'string' ? out.slackError.slice(0, 80) : null, errorType: out.errorType ? String(out.errorType).slice(0, 80) : null });
 }
 
+// 설정(AIWF_SLACK_SCREENSHOTS)에 맞는 첨부만, runs/ 안의 실제 파일만 고른다.
+export function selectAttachments(ctx, event) {
+  const mode = ctx.config.values.AIWF_SLACK_SCREENSHOTS || 'off';
+  if (mode === 'off') return [];
+  const runsRoot = path.join(ctx.workflowRoot, 'runs');
+  const picked = [];
+  for (const a of event.attachments ?? []) {
+    if (mode === 'failures' && a?.kind !== 'failure') continue;
+    if (typeof a?.path !== 'string' || !/.(png|jpe?g)$/i.test(a.path)) continue;
+    const abs = path.resolve(ctx.workflowRoot, a.path);
+    const rel = path.relative(runsRoot, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    let size;
+    try { size = fs.statSync(abs).size; } catch { continue; }
+    if (size === 0 || size > MAX_ATTACHMENT_BYTES) continue;
+    picked.push({ path: abs, rel: a.path, title: redact(String(a.title ?? path.basename(abs))).slice(0, 200) });
+    if (picked.length >= MAX_ATTACHMENTS) break;
+  }
+  return picked;
+}
+
+// 본문을 보낸 뒤 이미지를 같은 스레드에 올린다. 실패해도 다시 보내지 않고, 파일 위치를 한 줄로 알린다.
+async function sendAttachments(ctx, runId, event, threadTs, record) {
+  const files = selectAttachments(ctx, event);
+  if (!files.length) return null;
+  const channel = ctx.config.values.AIWF_SLACK_CHANNEL_ID;
+  const payloadPath = path.join(runDir(ctx, runId), 'outbox', `${event.eventId}-files.json`);
+  writeJsonAtomic(payloadPath, { channel, threadTs, files: files.map(({ path: p, title }) => ({ path: p, title })) });
+  let out = null;
+  try {
+    ({ out } = await sendPayload(ctx, payloadPath, { timeoutMs: UPLOAD_TIMEOUT_MS }));
+  } catch {
+    out = null;
+  }
+  if (out?.ok === true) {
+    record({ eventId: event.eventId, files: 'SENT', fileCount: files.length });
+    return 'SENT';
+  }
+  const error = String(out?.slackError ?? out?.configError ?? out?.errorType ?? 'TRANSPORT_FAILED').slice(0, 80);
+  record({ eventId: event.eventId, files: 'FAILED', fileCount: files.length, filesError: error });
+  const where = [...new Set(files.map((f) => path.posix.dirname(f.rel)))].map((d) => `.ai-workflow/${d}`).join(', ');
+  const notePath = path.join(runDir(ctx, runId), 'outbox', `${event.eventId}-files-note.json`);
+  const hint = error === 'missing_scope' ? ' (Slack 앱에 files:write 권한이 필요하다)' : '';
+  writeJsonAtomic(notePath, { channel, threadTs, text: `이미지 ${files.length}장 전송 실패 (${error})${hint} — 파일: ${where}` });
+  try { await sendPayload(ctx, notePath); } catch { /* 본문은 이미 갔다 */ }
+  return 'FAILED';
+}
+
 // 페이로드 파일 하나를 보낸다. 반환: 전송 스크립트의 결과 객체 + proc
-export async function sendPayload(ctx, payloadPath) {
+export async function sendPayload(ctx, payloadPath, { timeoutMs = TRANSPORT_TIMEOUT_MS } = {}) {
   const values = ctx.config.values;
   if (ctx.platform !== 'win32') {
     return { proc: { exitCode: 2, stdout: '' }, out: { ok: false, configError: 'UNSUPPORTED_PLATFORM' } };
@@ -89,7 +141,7 @@ export async function sendPayload(ctx, payloadPath) {
     cwd: ctx.workflowRoot,
     env: ctx.env,
     input: '',
-    timeoutMs: TRANSPORT_TIMEOUT_MS,
+    timeoutMs,
   });
   return { proc, out: parseTransportOutput(proc.stdout) };
 }
@@ -135,6 +187,7 @@ async function flushRun(ctx, runId, opts, budget) {
         threadTs = outcome.ts;
         writeJsonAtomic(threadFile, { threadTs, rootEventId: event.eventId });
       }
+      if (await sendAttachments(ctx, runId, event, threadTs, record) === 'SENT') summary.files = (summary.files ?? 0) + 1;
     } else if (outcome.status === 'RETRY_PENDING') {
       summary.retryPending++;
       if (outcome.httpStatus === 429) break;
@@ -159,8 +212,8 @@ export async function flushNotifications(ctx, opts = {}) {
 }
 
 export function describeFlush(result) {
-  const total = (key) => result.runs.reduce((n, r) => n + r[key], 0);
-  return `Slack 알림: 보냄 ${total('sent')}, 재시도 대기 ${total('retryPending')}, 수신 불명 ${total('uncertain')}, 실패 ${total('failed')}${total('skipped') ? `, 다음으로 미룸 ${total('skipped')}` : ''}`;
+  const total = (key) => result.runs.reduce((n, r) => n + (r[key] ?? 0), 0);
+  return `Slack 알림: 보냄 ${total('sent')}${total('files') ? ` (이미지 첨부 ${total('files')}건)` : ''}, 재시도 대기 ${total('retryPending')}, 수신 불명 ${total('uncertain')}, 실패 ${total('failed')}${total('skipped') ? `, 다음으로 미룸 ${total('skipped')}` : ''}`;
 }
 
 export async function cmdNotify(ctx, opts) {

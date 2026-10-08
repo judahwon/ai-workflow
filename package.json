@@ -1,6 +1,6 @@
 {
   "name": "ai-workflow",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "Claude Code 와 함께 기능을 논의·기획·설계·개발·검수·확정·문서화하는 프로젝트 무관 워크플로 엔진",
   "type": "module",

@@ -46,7 +46,7 @@ function fakeCodex(replies) {
 
 const FINDING = [{ severity: 'high', file: 'src/pages/orders/List.tsx', line: 1, message: '빈 결과 처리 없음' }];
 
-async function autonomousProject({ autonomous = true } = {}) {
+async function autonomousProject({ autonomous = true, browser = false } = {}) {
   const p = await configuredProject();
   const extra = {};
   const run = async (...argv) => {
@@ -56,7 +56,7 @@ async function autonomousProject({ autonomous = true } = {}) {
   };
   await run('init', '--set', 'AIWF_AUTO_MAX_REVIEW_ROUNDS=2');
   const checks = path.join(p.projectRoot, '..', `${path.basename(p.projectRoot)}-checks.json`);
-  fs.writeFileSync(checks, JSON.stringify({ origins: {}, checks: [{ id: 'lint', title: '린트', command: 'node -e "process.exit(0)"' }] }));
+  fs.writeFileSync(checks, JSON.stringify({ origins: browser ? { app: 'http://127.0.0.1:1' } : {}, checks: [{ id: 'lint', title: '린트', command: 'node -e "process.exit(0)"' }] }));
   assert.equal((await run('checks-set', '--from', checks, ...CONFIRMED)).code, 0);
   await run('new', '--title', '주문 상태 필터');
   p.write('features/FEAT-001/requirements.md', REQUIREMENTS);
@@ -66,6 +66,7 @@ async function autonomousProject({ autonomous = true } = {}) {
   p.write('features/FEAT-001/tasks.json', tasksJson([{ ...TASK, allowedFiles: ['src/pages/orders/**'] }]));
   p.write('features/FEAT-001/tests.json', testsJson([
     { id: 'TEST-001', title: '단위', kind: 'command', requirementIds: ['REQ-001', 'REQ-002'], command: 'node -e "process.exit(0)"' },
+    ...(browser ? [{ id: 'TEST-002', title: '목록 화면', kind: 'browser', origin: 'app', requirementIds: ['REQ-001'], steps: [{ action: 'goto', path: '/' }, { action: 'expectText', selector: 'h1', text: '주문' }] }] : []),
   ]));
   const loadRun = () => {
     const dir = path.join(p.workflowRoot, 'runs');
@@ -224,4 +225,46 @@ test('escalate: master 가 선택지와 함께 사용자를 부른다', async (t
   assert.match(r.out, /\[확인 필요\] 주문 상태 값이[\s\S]*1\. 기획대로 — API 를 바꾼다[\s\S]*2\. API 대로/);
   assert.equal(formatAlert(p.events().at(-1), SLACK),
     '<@U0123456789> 🟠 *[테스트 프로젝트] | 설계 | 확인 필요*\n기획 확인 필요: 주문 상태 값이 기획과 API 가 다르다\n할 일: Claude Code 에서 선택 — 기획대로 / API 대로');
+});
+
+// 화면 하나짜리 가짜 Playwright. screenshot 은 실제로 파일을 쓴다.
+function fakeBrowser(heading) {
+  const page = {
+    setDefaultTimeout() {},
+    async goto() { return { status: () => 200 }; },
+    url: () => 'http://127.0.0.1:1/',
+    async screenshot({ path: file }) { fs.writeFileSync(file, 'png'); },
+    locator() { const loc = { first: () => loc, async textContent() { return heading.text; }, async waitFor() {} }; return loc; },
+  };
+  return { chromium: { async launch() { return { async newContext() { return { newPage: async () => page }; }, async close() {} }; } } };
+}
+
+test('자율 진행 화면 캡처: 실패 화면은 검증 알림에, 통과 화면은 완료 보고에 붙는다', async (t) => {
+  const p = await autonomousProject({ browser: true });
+  t.after(p.cleanup);
+  let r = await p.run('approve', ...F, '--phase', 'design', '--by-master', '--reason', 'REQ 2개를 TASK-001 과 TEST-001·TEST-002 로 덮음');
+  assert.equal(r.code, 0, r.out);
+  git(p.projectRoot, 'add', '-A');
+  git(p.projectRoot, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'init');
+  await p.run('task-start', ...F, '--task', 'TASK-001');
+  fs.mkdirSync(path.join(p.projectRoot, 'src/pages/orders'), { recursive: true });
+  fs.writeFileSync(path.join(p.projectRoot, 'src/pages/orders/List.tsx'), 'v1');
+  await p.run('task-done', ...F, '--task', 'TASK-001', '--summary', '목록');
+  p.extra.runProcess = fakeCodex([reviewJson('APPROVED')]);
+  assert.equal((await p.run('review', ...F)).code, 0);
+
+  const heading = { text: '빈 화면' };
+  p.extra.playwright = fakeBrowser(heading);
+  r = await p.run('verify', ...F);
+  assert.equal(r.code, 3, r.out);
+  let event = p.events().at(-1);
+  assert.deepEqual(event.attachments.map((a) => [a.kind, a.title]), [['failure', 'TEST-002 목록 화면 — FAIL']]);
+  assert.match(event.attachments[0].path, /^runs\/.+\/verify\/V001\/TEST-002\/failure\.png$/);
+  assert.ok(fs.existsSync(path.join(p.workflowRoot, event.attachments[0].path)));
+
+  heading.text = '주문 목록';
+  r = await p.run('verify', ...F);
+  assert.equal(p.loadRun().waiting.kind, 'confirm', r.out);
+  event = p.events().at(-1);
+  assert.deepEqual(event.attachments.map((a) => [a.kind, a.title]), [['final', 'TEST-002 목록 화면']], '완료 보고에는 통과 화면을 묶는다');
 });

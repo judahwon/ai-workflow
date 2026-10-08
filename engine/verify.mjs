@@ -156,6 +156,7 @@ export async function cmdVerify(ctx, opts) {
       status: verification.passed ? 'PASS' : 'FAIL',
       reason: requiredBad.length ? requiredBad.map((r) => `${r.id} ${r.status} ${r.code}`).join(', ').slice(0, 900) : null,
       evidencePaths: results.map((r) => r.logPath).filter(Boolean),
+      attachments: screenshotAttachments(ctx, results, { finals: false }),
     };
     if (isAutonomous(run) && run.phase === 'VERIFY' && !verification.partial) {
       const full = run.verifications.filter((v) => !v.partial);
@@ -169,7 +170,8 @@ export async function cmdVerify(ctx, opts) {
         const tasks = run.approvals.design?.order.length ?? 0;
         const review = run.reviews?.at(-1);
         const reportLine = `설계·개발·검수·검증 완료 — 작업 ${tasks}개, 검수 ${review ? `R${String(review.seq).padStart(3, '0')} ${review.verdict}` : '사용자 허락'}, 자동 검증 통과 ${count('PASS')}건${manualIds.length ? `, 사람 확인 필요 ${manualIds.length}건 (${manualIds.join(', ')})` : ''}.`;
-        escalate(ctx, run, { kind: 'confirm', type: 'VERIFY_DONE', summary: reportLine, decision, fields: eventFields });
+        // 완료 보고에는 통과한 화면까지 묶어 보낸다. Slack 만 보고 확정할지 판단할 수 있게.
+        escalate(ctx, run, { kind: 'confirm', type: 'VERIFY_DONE', summary: reportLine, decision, fields: { ...eventFields, attachments: screenshotAttachments(ctx, results, { finals: true }) } });
         return { ok: verification.passed, message: [summary, ...resultLines(results), reportLine, '자율 진행: 사용자를 불렀다 (확정 요청).'].join('\n'), decision };
       }
       if (!verification.passed && streak >= max) {
@@ -186,12 +188,26 @@ export async function cmdVerify(ctx, opts) {
       summary,
       reason: requiredBad.length ? requiredBad.map((r) => `${r.id} ${r.status} ${r.code}`).join(', ').slice(0, 900) : null,
       evidencePaths: results.map((r) => r.logPath).filter(Boolean),
+      attachments: eventFields.attachments,
       nextAction: verification.passed ? (run.phase === 'VERIFY' ? '사용자에게 결과를 보여주고 confirm 으로 확정받는다.' : '검수 단계로 진행한다.') : '실패 원인을 고치거나 사용자와 상의한다.',
     });
     const lines = [summary, ...resultLines(results)];
     if (!fingerprint) lines.push('[주의] git 저장소가 아니라 결과가 지금 코드에 대한 것인지 확인하지 못한다.');
     return { ok: verification.passed, message: lines.join('\n'), decision };
   });
+}
+
+// 브라우저 테스트 스크린샷. 실패 화면은 늘, 통과 화면(final)은 finals 일 때만.
+function screenshotAttachments(ctx, results, { finals }) {
+  const out = [];
+  for (const r of results) {
+    const file = r.actual?.screenshot;
+    if (!file) continue;
+    const failed = r.status !== 'PASS';
+    if (!failed && !finals) continue;
+    out.push({ path: path.relative(ctx.workflowRoot, file).split(path.sep).join('/'), title: `${r.id} ${r.title}${failed ? ` — ${r.status}` : ''}`.slice(0, 200), kind: failed ? 'failure' : 'final' });
+  }
+  return out;
 }
 
 function resultLines(results) {

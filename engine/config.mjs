@@ -174,6 +174,14 @@ export const CONFIG_SECTIONS = [
         validate: (v) => (['all', 'important'].includes(v) ? null : 'all 또는 important'),
       },
       {
+        name: 'AIWF_SLACK_SCREENSHOTS',
+        question: 'Slack 알림에 화면 캡처를 붙일까요? (off: 안 붙임, failures: 테스트 실패 화면만, all: 시안·완료 보고 화면까지)',
+        description: 'Slack 화면 캡처 첨부: off | failures (테스트 실패만) | all (시안·완료 보고 포함). 화면에 실제 데이터가 보일 수 있다. Slack 앱에 files:write 권한이 필요하다.',
+        default: 'off',
+        required: SLACK_ON,
+        validate: (v) => (['off', 'failures', 'all'].includes(v) ? null : 'off, failures, all 중 하나'),
+      },
+      {
         name: 'AIWF_SLACK_WORKSPACE',
         question: 'Slack 워크스페이스 주소는? (예: example.slack.com)',
         description: 'Slack 워크스페이스 주소 (표시용).',

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WorkflowError, atomicWriteFile } from './util.mjs';
 
-export const ENGINE_VERSION = '0.6.1';
+export const ENGINE_VERSION = '0.6.2';
 export const VERSION_FILE = 'VERSION';
 
 function parse(version) {

@@ -56,6 +56,8 @@ export function appendEvent(ctx, run, fields) {
     // 자율 진행 중인 실행이면 멘션은 사용자를 부를 때(escalation)만 한다.
     autonomous: run.autonomy?.enabled === true,
     escalation: fields.escalation ?? null,
+    // Slack 에 붙일 화면 캡처: [{ path(.ai-workflow 기준), title, kind: failure|final|draft }]. 보낼지는 전송할 때 설정으로 정한다.
+    attachments: fields.attachments ?? [],
   };
   appendJsonl(file, event);
   if (notificationsEnabled(ctx) && NOTIFY_TYPES.has(event.type) && wanted(ctx, event)) {

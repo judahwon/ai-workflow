@@ -98,7 +98,7 @@ node .ai-workflow/engine/cli.mjs questions                   # 채울 항목 목
 | 이 PC (개인) | `AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN` | ✔ (기본값) |
 | | `AIWF_PLAYWRIGHT_MODULE`, `AIWF_BROWSER_CHANNEL`, `AIWF_REVIEW_BROWSER` (chrome/msedge) | |
 | 알림 (개인) | `AIWF_SLACK_ENABLED` (기본 false) | ✔ (기본값) |
-| | `AIWF_SLACK_LEVEL` (all/important, 기본 all) | ✔ (기본값) |
+| | `AIWF_SLACK_LEVEL` (all/important, 기본 all), `AIWF_SLACK_SCREENSHOTS` (off/failures/all, 기본 off) | ✔ (기본값) |
 | | `AIWF_SLACK_WORKSPACE`, `AIWF_SLACK_USER_ID`, `AIWF_SLACK_CHANNEL_ID`, `AIWF_SLACK_TOKEN_FILE` | Slack 사용 시 |
 
 ## 기능 진행
@@ -198,6 +198,10 @@ node .ai-workflow/engine/cli.mjs docs-done     --feature FEAT-001 --summary "<�
 - 확인 필요(검수 지적, 검증 실패·확정 대기, 승인 되돌림)와 오류, 기능 완료는 `AIWF_SLACK_USER_ID` 를 멘션한다.
   확인 필요의 셋째 줄은 Claude Code 에서 고를 선택지다. 같은 선택지가 CLI 출력의 `[확인 필요]` 블록에 나오고, aiwf 스킬이 객관식(AskUserQuestion)으로 묻는다.
 - `AIWF_SLACK_LEVEL=important` 면 기능 시작·완료와 확인 필요·오류만 보낸다 (기본 `all`).
+- **화면 캡처** (`AIWF_SLACK_SCREENSHOTS`): 브라우저 테스트 스크린샷을 알림 바로 아래 스레드에 이미지로 올린다.
+  `failures` 는 실패 화면만, `all` 은 자율 진행 완료 보고에 통과 화면까지 묶는다. 기본 `off` (화면에 실제 데이터가 보일 수 있다).
+  Slack 앱에 `files:write` 권한이 필요하다. 한 알림에 10장, 장당 10MB 까지, `runs/` 안의 파일만 보낸다.
+  업로드가 실패하면 다시 보내지 않고 "이미지 전송 실패 — 파일: …" 한 줄을 남긴다.
 - 전송 실패는 기능 상태를 바꾸지 않는다. 수신 여부가 불명확한 알림은 자동으로 다시 보내지 않는다 (`--retry-uncertain`).
 - Windows 가 아니면 보내지 않고 `UNSUPPORTED_PLATFORM` 으로 남긴다.
 
