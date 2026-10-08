@@ -27,7 +27,7 @@ description: ai-workflow 설정(프로젝트 공통 project.env, 개인 user.env
    - 그 밖에 `error` 가 있는 항목, 사용자가 바꾸겠다고 한 항목.
    - `AIWF_SLACK_ENABLED` 가 `false` 이면 나머지 Slack 항목은 묻지 않는다.
 3. **AskUserQuestion** 으로 묻는다. 한 번에 최대 4개 질문을 묶고, 구간(프로젝트 → 이 PC → 알림) 순서로 진행한다.
-   - 선택형(`AIWF_DOC_LANGUAGE`, `AIWF_BROWSER_CHANNEL`, `AIWF_SLACK_ENABLED`, `AIWF_SLACK_LEVEL`)은 허용값을 선택지로 준다.
+   - 선택형(`AIWF_DOC_LANGUAGE`, `AIWF_BROWSER_CHANNEL`, `AIWF_REVIEW_BROWSER`, `AIWF_SLACK_ENABLED`, `AIWF_SLACK_LEVEL`)은 허용값을 선택지로 준다.
    - 자유 입력 항목은 기본값이 있으면 "기본값 사용 (<값>)", 선택 항목이면 "비워 두기"를 선택지로 두고, 직접 입력은 Other 로 받는다.
    - 경로 항목(`AIWF_CLAUDE_BIN`, `AIWF_CODEX_BIN`, `AIWF_PLAYWRIGHT_MODULE` 등)은 묻기 전에 이 PC 에서 찾아 후보로 제시해도 된다
      (예: `where codex` / `which codex`). 찾은 값도 사용자가 고른 뒤에만 쓴다.

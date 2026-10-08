@@ -7,6 +7,8 @@ description: ai-workflow 검수 단계(REVIEW). 모든 작업이 끝난 기능�
 
 구현한 이 세션이 아니라 **다른 모델(Codex CLI, 읽기 전용)** 이 요구사항·설계 대비 변경을 검토한다.
 이 세션은 검수 결과를 고치거나 해석을 바꾸지 않고, 사용자에게 그대로 전한다.
+개인 설정 `AIWF_REVIEW_BROWSER` 가 있으면 Codex 가 headless 브라우저로 앱 화면도 확인한다. 그때는 `checks.json` 의 서버(origins)를 미리 띄워 둔다.
+서버가 없으면 화면 요구사항이 UNVERIFIED 로 나올 수 있다.
 
 ## 순서
 

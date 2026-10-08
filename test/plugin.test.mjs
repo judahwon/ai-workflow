@@ -136,3 +136,26 @@ test('플러그인: 훅 설정이 엔진 훅을 가리킨다', () => {
   assert.equal(entry.matcher, 'Edit|Write|MultiEdit|NotebookEdit');
   assert.match(entry.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/engine\/hook\.mjs/);
 });
+
+test('검수 브라우저: Codex 에 Playwright MCP 를 붙이는 인자', async () => {
+  const { reviewBrowserArgs, parseCodexStream, buildReviewPrompt } = await import('../engine/review.mjs');
+  assert.deepEqual(reviewBrowserArgs({ browser: null, outputDir: 'x', platform: 'win32' }), []);
+  const out = String.raw`C:\p\.ai-workflow\runs\R001-browser`;
+  const win = reviewBrowserArgs({ browser: 'chrome', outputDir: out, platform: 'win32' });
+  assert.ok(win.includes("mcp_servers.aiwf_browser.command='cmd'"));
+  const args = win.find((a) => a.startsWith('mcp_servers.aiwf_browser.args='));
+  assert.match(args, /^mcp_servers\.aiwf_browser\.args=\['\/d','\/c','npx','-y','@playwright\/mcp@[\d.]+','--browser','chrome','--headless','--isolated','--output-dir','(.+)'\]$/);
+  assert.equal(/'--output-dir','(.+)'\]$/.exec(args)[1], out);
+  assert.ok(!win.some((a) => a.includes('"')), 'cmd.exe 를 거쳐도 깨지지 않게 큰따옴표를 쓰지 않는다');
+  assert.ok(win.includes("mcp_servers.aiwf_browser.default_tools_approval_mode='approve'"));
+  const posix = reviewBrowserArgs({ browser: 'msedge', outputDir: '/p/out', platform: 'linux' });
+  assert.ok(posix.includes("mcp_servers.aiwf_browser.command='npx'"));
+  assert.throws(() => reviewBrowserArgs({ browser: 'chrome', outputDir: "/it's", platform: 'linux' }), /REVIEW_BROWSER_PATH|'/);
+  const stream = [
+    { type: 'item.completed', item: { type: 'mcp_tool_call', server: 'aiwf_browser', tool: 'browser_navigate' } },
+    { type: 'item.completed', item: { type: 'mcp_tool_call', server: 'other', tool: 'x' } },
+    { type: 'item.completed', item: { type: 'agent_message', text: '{}' } },
+  ].map((e) => JSON.stringify(e)).join('\n');
+  assert.equal(parseCodexStream(stream).browserCalls, 1);
+  assert.equal(typeof buildReviewPrompt, 'function');
+});

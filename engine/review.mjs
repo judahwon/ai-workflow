@@ -15,9 +15,32 @@ import { featureDir } from './documents.mjs';
 import { buildInvocation } from './process.mjs';
 import { workspaceFingerprint, diffSince } from './scope.mjs';
 import { requireApproval } from './verify.mjs';
+import { loadChecks } from './testplan.mjs';
 
 const REVIEW_TIMEOUT_MS = 30 * 60 * 1000;
 const AUTH_TIMEOUT_MS = 30 * 1000;
+// 검수자가 화면을 볼 때 쓰는 MCP 서버. 시험한 버전으로 고정한다.
+const PLAYWRIGHT_MCP = '@playwright/mcp@0.0.83';
+const BROWSER_SERVER = 'aiwf_browser';
+
+// Codex 에 Playwright MCP 서버(headless, 격리 프로필)를 붙이는 -c 인자. MCP 서버는 샌드박스 밖에서 돈다.
+// 스냅샷·스크린샷은 outputDir(검수 기록 폴더)에만 쓰게 해 작업 트리를 건드리지 않는다.
+// cmd.exe 를 거쳐도 깨지지 않게 TOML 값은 작은따옴표 문자열만 쓴다.
+export function reviewBrowserArgs({ browser, outputDir, platform }) {
+  if (!browser) return [];
+  if (outputDir.includes("'")) throw blocked('REVIEW_BROWSER_PATH', `검수 기록 경로에 ' 가 있어 브라우저를 붙일 수 없다: ${outputDir}`);
+  const npx = ['npx', '-y', PLAYWRIGHT_MCP, '--browser', browser, '--headless', '--isolated', '--output-dir', outputDir];
+  const [command, ...args] = platform === 'win32' ? ['cmd', '/d', '/c', ...npx] : npx;
+  const toml = (v) => `'${v}'`;
+  const key = `mcp_servers.${BROWSER_SERVER}`;
+  return [
+    '-c', `${key}.command=${toml(command)}`,
+    '-c', `${key}.args=[${args.map(toml).join(',')}]`,
+    '-c', `${key}.startup_timeout_sec=120`,
+    // exec 는 승인 창이 없어 승인이 필요한 MCP 호출은 모두 거부된다. 이 서버만 자동 승인한다.
+    '-c', `${key}.default_tools_approval_mode='approve'`,
+  ];
+}
 // API 키 인증으로 넘어가지 않도록 chatgpt 모드에서는 검수자에게 넘기지 않는 환경변수.
 const API_KEY_ENV = /^(OPENAI_API_KEY|CODEX_API_KEY|AZURE_OPENAI_API_KEY|OPENAI_.*_KEY)$/i;
 
@@ -57,14 +80,16 @@ export function parseCodexStream(stdout) {
   const messages = [];
   let fileChanges = 0;
   let errors = 0;
+  let browserCalls = 0;
   for (const it of items) {
     const item = it?.item;
     if (it?.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') messages.push(item.text);
     if (it?.msg?.type === 'agent_message' && typeof it.msg.message === 'string') messages.push(it.msg.message);
     if (item?.type === 'file_change' || it?.msg?.type === 'patch_apply_begin') fileChanges++;
+    if (it?.type === 'item.completed' && item?.type === 'mcp_tool_call' && item.server === BROWSER_SERVER) browserCalls++;
     if (it?.type === 'error' || it?.type === 'turn.failed' || it?.msg?.type === 'error') errors++;
   }
-  return { lastMessage: messages.at(-1) ?? null, fileChanges, errors };
+  return { lastMessage: messages.at(-1) ?? null, fileChanges, errors, browserCalls };
 }
 
 const VERDICTS = ['APPROVED', 'CHANGES_REQUESTED'];
@@ -137,7 +162,7 @@ function readText(file) {
   try { return fs.readFileSync(file, 'utf8'); } catch { return '(없음)'; }
 }
 
-export function buildReviewPrompt(ctx, run, { files, diff }) {
+export function buildReviewPrompt(ctx, run, { files, diff, browser = null }) {
   const fdir = featureDir(ctx, run.featureId);
   const values = ctx.config.values;
   const english = values.AIWF_DOC_LANGUAGE === 'en';
@@ -150,6 +175,7 @@ export function buildReviewPrompt(ctx, run, { files, diff }) {
     english
       ? 'Read the changed files in the repository as needed. Check every requirement (REQ) against the implementation, look for bugs, missing edge cases, security issues and changes outside the design.'
       : '필요하면 저장소의 변경 파일을 직접 읽는다. 요구사항(REQ)마다 구현을 확인하고, 버그·빠진 예외 처리·보안 문제·설계 밖 변경을 찾는다.',
+    ...browserSection(english, browser),
     '',
     `# ${run.featureId} ${run.title}`,
     '',
@@ -184,6 +210,22 @@ export function buildReviewPrompt(ctx, run, { files, diff }) {
   ].join('\n');
 }
 
+function browserSection(english, browser) {
+  if (!browser) return [];
+  const origins = Object.entries(browser.origins ?? {}).map(([name, url]) => `- ${name}: ${url}`);
+  return english ? [
+    '',
+    `You can check the running app in a real browser (${browser.channel}, headless) with the ${BROWSER_SERVER} tools. Use it for UI requirements: open the pages, read the snapshot, try the flows.`,
+    'Do not submit, save or delete anything that changes server data. If the server is not reachable, do not guess: mark that requirement UNVERIFIED and say so in evidence.',
+    ...(origins.length ? ['Server addresses:', ...origins] : ['No server address is registered in checks.json.']),
+  ] : [
+    '',
+    `${BROWSER_SERVER} 도구로 실제 브라우저(${browser.channel}, headless)에서 실행 중인 앱을 확인할 수 있다. 화면 요구사항은 페이지를 열어 스냅샷을 읽고 흐름을 직접 따라가 본다.`,
+    '서버 데이터를 바꾸는 조작(저장·삭제·제출)은 하지 않는다. 서버에 연결되지 않으면 추측하지 말고 그 요구사항을 UNVERIFIED 로 두고 evidence 에 적는다.',
+    ...(origins.length ? ['서버 주소:', ...origins] : ['checks.json 에 등록된 서버 주소가 없다.']),
+  ];
+}
+
 function interpret(proc, requirementIds) {
   if (proc.spawnError) {
     return proc.spawnError.code === 'ENOENT'
@@ -200,7 +242,7 @@ function interpret(proc, requirementIds) {
   }
   const review = parseReview(parsed.lastMessage, requirementIds);
   if (!review.ok) return { ok: false, code: review.code, message: `구조화된 검수 결과를 확인할 수 없다 (${review.code}${review.missing ? `: ${review.missing.join(',')}` : ''}).` };
-  return { ok: true, review: review.review };
+  return { ok: true, review: review.review, browserCalls: parsed.browserCalls };
 }
 
 export async function cmdReview(ctx, opts) {
@@ -213,11 +255,13 @@ export async function cmdReview(ctx, opts) {
     if (!['REVIEW', 'VERIFY'].includes(run.phase)) throw blocked('WRONG_PHASE', `검수는 모든 작업이 끝난 뒤에 한다 (현재 ${PHASE_LABELS[run.phase]}).`);
     const { files, base } = featureChanges(run);
     const diff = base && files.length ? diffSince(ctx, base, files) : '';
-    const prompt = buildReviewPrompt(ctx, run, { files, diff });
     run.reviews ??= [];
     const seq = run.reviews.length + 1;
     const dir = path.join(runDir(ctx, run.runId), 'reviews');
     const name = `R${String(seq).padStart(3, '0')}`;
+    const channel = values.AIWF_REVIEW_BROWSER || null;
+    const browser = channel ? { channel, origins: loadChecks(ctx).origins } : null;
+    const prompt = buildReviewPrompt(ctx, run, { files, diff, browser });
     atomicWriteFile(path.join(dir, `${name}-prompt.md`), prompt);
     const fingerprint = workspaceFingerprint(ctx);
     const env = reviewerEnv(ctx.env, values.AIWF_REVIEW_AUTH);
@@ -235,7 +279,9 @@ export async function cmdReview(ctx, opts) {
     // Windows 는 사용자 설정을 무시하면 샌드박스가 없어 읽기 명령까지 정책으로 거부된다. unelevated 샌드박스는 읽기만 허용한다.
     const sandbox = ctx.platform === 'win32' ? ['-c', 'windows.sandbox=unelevated'] : [];
     const invocation = buildInvocation(values.AIWF_CODEX_BIN, [
-      'exec', '--sandbox', 'read-only', ...sandbox, '--json', '--ignore-user-config', '--ephemeral', '--model', values.AIWF_REVIEW_MODEL, '-C', ctx.projectRoot, '-',
+      'exec', '--sandbox', 'read-only', ...sandbox, '--json', '--ignore-user-config', '--ephemeral', '--model', values.AIWF_REVIEW_MODEL,
+      ...reviewBrowserArgs({ browser: channel, outputDir: path.join(dir, `${name}-browser`), platform: ctx.platform }),
+      '-C', ctx.projectRoot, '-',
     ], { env, platform: ctx.platform });
     const proc = await ctx.runProcess({ ...invocation, cwd: ctx.projectRoot, env, input: prompt, timeoutMs: REVIEW_TIMEOUT_MS });
     const outcome = interpret(proc, run.approvals.plan.requirementIds);
@@ -256,7 +302,7 @@ export async function cmdReview(ctx, opts) {
       throw blocked(outcome.code, `${outcome.message} 사용자 허락이 있으면 review-accept 로 넘길 수 있다.`, { decision });
     }
     const review = outcome.review;
-    const record = { seq, at: ctx.now(), requestedModel: values.AIWF_REVIEW_MODEL, auth: values.AIWF_REVIEW_AUTH === 'chatgpt' ? 'CHATGPT' : 'UNCHECKED', fingerprint, base, files, ...review };
+    const record = { seq, at: ctx.now(), requestedModel: values.AIWF_REVIEW_MODEL, auth: values.AIWF_REVIEW_AUTH === 'chatgpt' ? 'CHATGPT' : 'UNCHECKED', fingerprint, base, files, browser: channel ? { channel, calls: outcome.browserCalls } : null, ...review };
     writeJsonAtomic(path.join(dir, `${name}.json`), record);
     run.reviews.push({ seq, at: record.at, verdict: review.verdict, summary: review.summary.slice(0, 300), findings: review.findings.length, file: `runs/${run.runId}/reviews/${name}.json` });
     if (review.verdict === 'APPROVED') {
@@ -300,6 +346,7 @@ export async function cmdReview(ctx, opts) {
     const lines = [
       `검수 ${name} (요청 모델 ${values.AIWF_REVIEW_MODEL}, 실제 모델은 확인 불가): ${review.verdict}`,
       review.summary,
+      ...(channel ? [`브라우저 확인 (${channel}): 도구 호출 ${outcome.browserCalls}번${outcome.browserCalls ? '' : ' — 화면은 보지 않았다'}`] : []),
       '',
       '요구사항:',
       ...review.requirementChecks.map((c) => `  ${c.status.padEnd(10)} ${c.requirementId} — ${c.evidence.slice(0, 200)}`),

@@ -145,6 +145,12 @@ export const CONFIG_SECTIONS = [
         description: '브라우저 테스트 채널: msedge | chrome | chromium',
         validate: (v) => (['msedge', 'chrome', 'chromium'].includes(v) ? null : 'msedge, chrome, chromium 중 하나'),
       },
+      {
+        name: 'AIWF_REVIEW_BROWSER',
+        question: 'Codex 검수 때 브라우저로 화면을 직접 확인하게 할까요? (chrome, msedge 중 하나. 비우면 안 씀)',
+        description: 'Codex 검수자가 쓸 브라우저 (Playwright MCP, headless): chrome | msedge. 비우면 코드만 본다.',
+        validate: (v) => (['chrome', 'msedge'].includes(v) ? null : 'chrome, msedge 중 하나'),
+      },
     ],
   },
   {

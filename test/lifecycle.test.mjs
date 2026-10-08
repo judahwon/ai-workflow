@@ -235,11 +235,19 @@ test('전체 흐름: 검수 지적 → 다시 열기 → 검수 승인 → 검�
   r = await run('task-done', ...F, '--task', 'TASK-001', '--summary', '빈 결과 처리 추가');
   assert.equal(r.code, 0, r.out);
 
-  // 2차 검수: 승인 → 검증 단계.
+  // 2차 검수: 이번엔 검수자에게 브라우저를 붙인다. 승인 → 검증 단계.
+  const userEnv = fs.readFileSync(p.overrides.userConfigFile, 'utf8');
+  assert.match(userEnv, /^AIWF_REVIEW_BROWSER=$/m, 'init 이 개인 설정에 빈 값으로 넣어 둔다');
+  fs.writeFileSync(p.overrides.userConfigFile, userEnv.replace(/^AIWF_REVIEW_BROWSER=$/m, 'AIWF_REVIEW_BROWSER=chrome'));
   extra.runProcess = fakeCodex([reviewJson('APPROVED')]);
   r = await run('review', ...F);
   assert.equal(r.code, 0, r.out);
   assert.equal(loadRun(p).phase, 'VERIFY');
+  assert.match(r.out, /브라우저 확인 \(chrome\): 도구 호출 0번 — 화면은 보지 않았다/);
+  assert.match(extra.runProcess.calls[0].text, /mcp_servers\.aiwf_browser\.args=.*--browser.*chrome.*R002-browser/);
+  const prompt2 = fs.readFileSync(path.join(p.workflowRoot, 'runs', loadRun(p).runId, 'reviews', 'R002-prompt.md'), 'utf8');
+  assert.match(prompt2, /aiwf_browser 도구로 실제 브라우저\(chrome, headless\)/);
+  assert.match(prompt2, /서버 주소:|등록된 서버 주소가 없다/);
 
   r = await run('verify', ...F);
   assert.equal(r.code, 3, r.out);

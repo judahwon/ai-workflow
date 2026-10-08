@@ -19,10 +19,12 @@ export function isVendoredEngine(engineDir) {
 }
 
 // 플러그인 모드의 프로젝트 루트: start 에서 위로 올라가며 .ai-workflow/ 가 있는 첫 폴더. 없으면 null.
-export function findProjectRoot(start) {
+// 개인 설정 폴더(~/.ai-workflow/user.env 가 있는 곳)는 프로젝트가 아니다.
+export function findProjectRoot(start, env = process.env) {
+  const userDirs = new Set([path.join(os.homedir(), WORKFLOW_DIR_NAME), path.dirname(defaultUserConfigFile(env))].map((d) => path.resolve(d).toLowerCase()));
   for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, WORKFLOW_DIR_NAME);
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return dir;
+    if (!userDirs.has(candidate.toLowerCase()) && fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return dir;
     if (path.dirname(dir) === dir) return null;
   }
 }
